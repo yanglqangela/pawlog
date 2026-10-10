@@ -1,0 +1,61 @@
+:root {
+  /* ---- 色板：温暖治愈系 ---- */
+  --c-bg:        #FBF9F6;
+  --c-bg-warm:   #F6F1EA;
+  --c-surface:   #FFFFFF;
+  --c-surface-2: #FDFBF8;
+
+  --c-ink:       #2B2622;
+  --c-ink-2:     #6B625A;
+  --c-ink-3:     #A0958C;
+  --c-ink-4:     #C9C1B9;
+
+  --c-line:      #EDE7E0;
+  --c-line-soft: #F4EFE9;
+
+  /* 品牌：蜜橘 */
+  --c-brand:      #F2734F;
+  --c-brand-deep: #D95A38;
+  --c-brand-soft: #FFF0EA;
+
+  /* 语义色 */
+  --c-mint:       #2FAE97;
+  --c-mint-soft:  #E6F6F2;
+  --c-sun:        #DE9412;
+  --c-sun-soft:   #FDF2DF;
+  --c-rose:       #D9527A;
+  --c-rose-soft:  #FDECF2;
+  --c-lilac:      #7C6BC4;
+  --c-lilac-soft: #F0EDFB;
+  --c-sky:        #3D8BD4;
+  --c-sky-soft:   #E7F1FB;
+
+  /* ---- 字号 ---- */
+  --fs-display: 30px;
+  --fs-h1:      22px;
+  --fs-h2:      17px;
+  --fs-h3:      15px;
+  --fs-body:    14px;
+  --fs-sm:      13px;
+  --fs-xs:      11.5px;
+
+  /* ---- 间距 ---- */
+  --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;
+  --sp-5: 20px; --sp-6: 24px; --sp-7: 32px; --sp-8: 44px;
+
+  /* ---- 圆角 ---- */
+  --r-sm: 8px; --r-md: 12px; --r-lg: 16px; --r-xl: 22px; --r-full: 999px;
+
+  /* ---- 阴影 ---- */
+  --sh-1: 0 1px 2px rgba(43,38,34,.05), 0 1px 3px rgba(43,38,34,.04);
+  --sh-2: 0 2px 8px rgba(43,38,34,.06), 0 1px 3px rgba(43,38,34,.04);
+  --sh-3: 0 8px 24px rgba(43,38,34,.09), 0 2px 6px rgba(43,38,34,.04);
+  --sh-4: 0 18px 48px rgba(43,38,34,.16), 0 4px 12px rgba(43,38,34,.06);
+
+  --font: "PingFang SC", "HarmonyOS Sans SC", "Microsoft YaHei", "Noto Sans SC",
+          -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --sidebar-w: 232px;
+  --tabbar-h: 62px;
+  --ease: cubic-bezier(.22,.61,.36,1);
+}

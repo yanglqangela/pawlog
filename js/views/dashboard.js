@@ -1,0 +1,227 @@
+/* ============================================================
+   首页 — 今日待办 / 宠物概览 / 健康速览 / 最近瞬间 / 附近宠友
+   ============================================================ */
+import * as store from '../store.js';
+import { esc, relDate, fmtDate, todayISO, toast, openModal, field, selectHTML, icon } from '../ui.js';
+
+function heroHTML(pet, pets) {
+  const recs = store.recordsOf(pet.id);
+  const weights = recs.filter((r) => r.type === 'weight');
+  const first = weights[weights.length - 1];
+  const latest = weights[0];
+  const gained = first && latest ? (latest.value - first.value).toFixed(1) : null;
+  const days = Math.floor((Date.now() - new Date(pet.birthday).getTime()) / 86400000);
+
+  return `
+    <div class="pet-hero">
+      <div class="pet-hero__main">
+        <div class="petavatar avatar--xl avatar--ring" style="background:#fff">${esc(pet.emoji)}</div>
+        <div class="grow">
+          <div class="row" style="gap:8px">
+            <span class="pet-hero__name">${esc(pet.name)}</span>
+            <span class="tag tag--${esc(pet.color || 'brand')}">${esc(pet.species)}</span>
+          </div>
+          <div class="pet-hero__meta">${esc(pet.breed)} · ${esc(pet.gender)} · ${esc(pet.neutered ? '已绝育' : '未绝育')}</div>
+          <div class="pet-hero__meta">${esc(store.ageText(pet.birthday))} · 陪伴你 ${days} 天</div>
+        </div>
+      </div>
+      ${pet.bio ? `<p class="pet-hero__bio">${esc(pet.bio)}</p>` : ''}
+      <div class="pet-hero__stats">
+        <div>
+          <div class="stat__label">当前体重</div>
+          <div class="stat__value">${latest ? latest.value : '—'}<small>kg</small></div>
+        </div>
+        <div>
+          <div class="stat__label">累计增重</div>
+          <div class="stat__value">${gained ? `+${gained}` : '—'}<small>kg</small></div>
+        </div>
+        <div>
+          <div class="stat__label">健康记录</div>
+          <div class="stat__value">${recs.length}<small>条</small></div>
+        </div>
+        <div>
+          <div class="stat__label">成长瞬间</div>
+          <div class="stat__value">${store.timelineOf(pet.id).length}<small>个</small></div>
+        </div>
+      </div>
+    </div>`;
+}
+
+function remindersHTML(petId) {
+  const list = store.reminders(petId);
+  if (!list.length) {
+    return `<div class="empty"><div class="empty__ico">🌿</div>
+      <div class="empty__title">暂时没有待办</div>
+      <div class="empty__text">疫苗和驱虫记录会自动生成到期提醒</div></div>`;
+  }
+  return `<div class="stack">${list.map((r) => `
+    <div class="reminder reminder--${r.level}">
+      <span class="reminder__ico">${esc(r.ico)}</span>
+      <div class="grow">
+        <div class="reminder__title">${esc(r.title)}</div>
+        <div class="reminder__sub">${esc(r.sub || '')} · 下次 ${esc(fmtDate(r.date, false))}</div>
+      </div>
+      <div class="reminder__when" style="color:${
+        r.level === 'due' ? 'var(--c-rose)' : r.level === 'soon' ? 'var(--c-sun)' : 'var(--c-mint)'
+      }">${esc(r.text)}</div>
+    </div>`).join('')}</div>`;
+}
+
+function tilesHTML(petId) {
+  const recs = store.recordsOf(petId);
+  const latestOf = (t) => recs.find((r) => r.type === t);
+
+  const w = latestOf('weight');
+  const v = latestOf('vaccine');
+  const d = latestOf('deworm');
+  const vt = latestOf('vet');
+
+  const tile = (ico, label, value, unit, foot) => `
+    <div class="tile">
+      <div class="tile__top"><span class="tile__label">${esc(label)}</span><span class="tile__ico">${esc(ico)}</span></div>
+      <div class="tile__value">${esc(value)}${unit ? `<small>${esc(unit)}</small>` : ''}</div>
+      <div class="tile__foot">${esc(foot)}</div>
+    </div>`;
+
+  return `
+    ${tile('⚖️', '最近体重', w ? w.value : '—', 'kg', w ? relDate(w.date) : '还没有记录')}
+    ${tile('💉', '最近疫苗', v ? v.name.replace(/（.*?）/, '') : '—', '', v ? relDate(v.date) : '还没有记录')}
+    ${tile('🐛', '最近驱虫', d ? d.kind : '—', '', d ? relDate(d.date) : '还没有记录')}
+    ${tile('🏥', '最近就诊', vt ? '有记录' : '—', '', vt ? relDate(vt.date) : '身体棒棒的')}`;
+}
+
+function nearbyHTML() {
+  const st = store.get();
+  const near = [...st.friends].sort((a, b) => a.distance - b.distance).slice(0, 4);
+  return `<div class="grid grid--auto">${near.map((f) => `
+    <a class="card card--pad" href="#/nearby">
+      <div class="friend__head">
+        <div class="avatar avatar--lg" style="background:var(--c-bg-warm)">${esc(f.emoji)}</div>
+        <div class="grow">
+          <div class="friend__name">${esc(f.name)}</div>
+          <div class="friend__loc">📍 ${esc(f.city)}·${esc(f.district)} · ${f.distance}km</div>
+        </div>
+      </div>
+      <p class="friend__bio" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(f.bio)}</p>
+      <div class="friend__pets">${f.pets.map((p) => `<span class="tag">${esc(p.species)} · ${esc(p.breed)}</span>`).join('')}</div>
+    </a>`).join('')}</div>`;
+}
+
+function momentsHTML(petId) {
+  const list = store.timelineOf(petId).slice(0, 2);
+  if (!list.length) {
+    return `<div class="empty"><div class="empty__ico">📸</div>
+      <div class="empty__title">还没有成长记录</div>
+      <div class="empty__text">记下第一个瞬间吧</div></div>`;
+  }
+  return `<div class="stack">${list.map((t) => `
+    <div class="card card--pad">
+      <div class="row row--between" style="align-items:flex-start">
+        <div class="grow">
+          <div class="row" style="gap:7px;flex-wrap:wrap">
+            ${t.milestone ? `<span class="tag tag--sun">🏅 里程碑</span>` : ''}
+            <span class="strong">${esc(t.title)}</span>
+          </div>
+          <div class="xs muted" style="margin-top:3px">${esc(fmtDate(t.date))}</div>
+        </div>
+        <div style="font-size:26px">${esc((t.photos || [])[0] || '🐾')}</div>
+      </div>
+      <p class="small" style="color:var(--c-ink-2);margin-top:8px">${esc(t.text)}</p>
+    </div>`).join('')}</div>`;
+}
+
+export default function dashboard(el) {
+  const st = store.get();
+  const pet = store.activePet();
+
+  el.innerHTML = `
+    <div class="page-head">
+      <h1>你好，${esc(st.me.name)} 👋</h1>
+      <p>今天也一起照顾好 ${esc(pet.name)} 吧</p>
+    </div>
+
+    ${st.pets.length > 1 ? `
+    <div class="scroller" style="margin-bottom:var(--sp-4)" id="pet-tabs">
+      ${st.pets.map((p) => `
+        <button class="chip ${p.id === pet.id ? 'is-active' : ''}" data-pet="${esc(p.id)}">
+          ${esc(p.emoji)} ${esc(p.name)}
+        </button>`).join('')}
+      <button class="chip" id="add-pet">＋ 添加宠物</button>
+    </div>` : ''}
+
+    <div class="section">${heroHTML(pet, st.pets)}</div>
+
+    <div class="section">
+      <div class="section__head">
+        <h2>今日待办</h2>
+        <a class="section__more" href="#/health">健康档案 →</a>
+      </div>
+      ${remindersHTML(pet.id)}
+    </div>
+
+    <div class="section">
+      <div class="section__head"><h2>健康速览</h2></div>
+      <div class="grid grid--4">${tilesHTML(pet.id)}</div>
+    </div>
+
+    <div class="section">
+      <div class="section__head">
+        <h2>最近成长瞬间</h2>
+        <a class="section__more" href="#/timeline">全部时光 →</a>
+      </div>
+      ${momentsHTML(pet.id)}
+    </div>
+
+    <div class="section">
+      <div class="section__head">
+        <h2>附近的宠友</h2>
+        <a class="section__more" href="#/nearby">发现更多 →</a>
+      </div>
+      ${nearbyHTML()}
+    </div>
+  `;
+
+  // 宠物切换
+  el.querySelectorAll('[data-pet]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      store.setActivePet(btn.dataset.pet);
+      dashboard(el);
+    });
+  });
+
+  const addBtn = el.querySelector('#add-pet');
+  if (addBtn) addBtn.addEventListener('click', () => openAddPet(() => dashboard(el)));
+}
+
+export function openAddPet(after) {
+  openModal({
+    title: '添加宠物',
+    submit: '创建档案',
+    body:
+      field('名字', `<input name="name" required maxlength="12" placeholder="比如：布丁">`) +
+      field('头像', `<input name="emoji" maxlength="4" value="🐾" placeholder="填一个 emoji">`, '贴一个 emoji 当头像，比上传图片快') +
+      field('种类', selectHTML('species', [['猫', '猫'], ['狗', '狗'], ['其他', '其他']], '猫')) +
+      field('品种', `<input name="breed" required maxlength="24" placeholder="比如：中华田园猫">`) +
+      field('性别', selectHTML('gender', [['公', '公'], ['母', '母']], '公')) +
+      field('出生日期', `<input type="date" name="birthday" required value="${todayISO()}">`) +
+      field('当前体重 (kg)', `<input type="number" name="weight" step="0.1" min="0" placeholder="比如：4.8">`) +
+      field('一句话介绍', `<textarea name="bio" maxlength="80" placeholder="它的性格、来历、小怪癖……"></textarea>`),
+    onSubmit(data) {
+      if (!data.name || !data.breed) { toast('请填写名字和品种', '⚠️'); return false; }
+      store.addPet({
+        name: data.name,
+        emoji: data.emoji || '🐾',
+        species: data.species,
+        breed: data.breed,
+        gender: data.gender,
+        neutered: false,
+        birthday: data.birthday,
+        weight: Number(data.weight) || 0,
+        color: 'brand',
+        bio: data.bio || '',
+      });
+      toast(`${data.name} 的档案已创建`);
+      if (after) after();
+    },
+  });
+}
