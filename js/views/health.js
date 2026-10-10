@@ -166,6 +166,9 @@ function vaccineSection(pet) {
           <div class="list__sub">${esc(fmtDate(r.date))} · ${esc(r.hospital || '—')}${r.batch ? ` · 批号 ${esc(r.batch)}` : ''}</div>
           ${d ? `<div class="xs" style="color:${color};font-weight:650;margin-top:4px">下次接种 ${esc(fmtDate(r.nextDate, false))} · ${esc(d.text)}</div>` : ''}
         </div>
+        <div class="col" style="align-items:flex-end;gap:6px;flex:none">
+          ${d ? `<button class="btn btn--soft btn--sm" data-done data-type="vaccine" data-kind="" data-name="${esc(r.name)}" data-product="">今天打了 ✓</button>` : ''}
+        </div>
       </div>`;
   }).join('')}</div></div>`
     : `<div class="empty card card--pad"><div class="empty__ico">💉</div>
@@ -188,6 +191,9 @@ function dewormSection(pet) {
           <div class="list__sub">${esc(fmtDate(r.date))} · ${esc(r.product || '—')}</div>
           ${d ? `<div class="xs" style="color:${d.level === 'due' ? 'var(--c-rose)' : d.level === 'soon' ? 'var(--c-sun)' : 'var(--c-mint)'};font-weight:650;margin-top:4px">
             下次 ${esc(fmtDate(r.nextDate, false))} · ${esc(d.text)}</div>` : ''}
+        </div>
+        <div class="col" style="align-items:flex-end;gap:6px;flex:none">
+          ${d ? `<button class="btn btn--soft btn--sm" data-done data-type="deworm" data-kind="${esc(r.kind)}" data-name="" data-product="${esc(r.product || '')}">今天做了 ✓</button>` : ''}
         </div>
       </div>`;
   }).join('')}</div></div>`
@@ -214,28 +220,55 @@ function vetSection(pet) {
 /* ---------- 添加表单 ---------- */
 const FORMS = {
   weight(pet, after) {
+    // 「沿用上次」直接预填，用户多数时候只要确认一下
+    const last = store.lastRecord(pet.id, 'weight');
+    const preset = last ? last.value : '';
     openModal({
       title: `记录 ${pet.name} 的体重`,
       body:
-        field('体重 (kg)', `<input type="number" name="value" step="0.1" min="0.1" max="120" required placeholder="比如：4.8">`) +
-        field('测量日期', `<input type="date" name="date" value="${todayISO()}" required>`),
+        field('体重 (kg)',
+          `<input type="number" name="value" step="0.1" min="0.1" max="120" required value="${preset}" placeholder="比如：4.8">`,
+          last ? `已填上次的 ${last.value}kg（${fmtDate(last.date, false)}），有变化改一下就行` : '') +
+        field('测量日期', `<input type="date" name="date" value="${todayISO()}" required>`) +
+        (last && last.value > 0 ? `
+        <div class="row" style="gap:6px;flex-wrap:wrap">
+          <button type="button" class="chip" data-delta="-0.2">−0.2</button>
+          <button type="button" class="chip" data-delta="-0.1">−0.1</button>
+          <button type="button" class="chip" data-delta="0">保持 ${last.value}</button>
+          <button type="button" class="chip" data-delta="0.1">+0.1</button>
+          <button type="button" class="chip" data-delta="0.2">+0.2</button>
+        </div>` : ''),
       onSubmit(d) {
         const v = Number(d.value);
         if (!(v > 0)) { toast('体重需要大于 0', '⚠️'); return false; }
         store.addRecord({ petId: pet.id, type: 'weight', value: v, date: d.date });
-        toast(`已记录 ${v}kg`);
+        const delta = last ? v - last.value : 0;
+        toast(delta === 0 ? `已记录 ${v}kg` : `已记录 ${v}kg（${delta > 0 ? '+' : ''}${delta.toFixed(1)}）`);
         after();
       },
     });
+
+    // 快捷增减按钮
+    const panel = document.getElementById('modal-form');
+    if (panel && last) {
+      panel.querySelectorAll('[data-delta]').forEach((b) =>
+        b.addEventListener('click', () => {
+          const input = panel.querySelector('[name="value"]');
+          input.value = (Number(last.value) + Number(b.dataset.delta)).toFixed(1);
+        }));
+    }
   },
+
   vaccine(pet, after) {
+    const last = store.lastRecord(pet.id, 'vaccine');
+    const nextPreset = last?.nextDate || store.suggestNext('vaccine', null, todayISO());
     openModal({
       title: '添加疫苗记录',
       body:
-        field('疫苗名称', `<input name="name" required placeholder="比如：猫三联（第三针）">`) +
+        field('疫苗名称', `<input name="name" required value="${esc(last?.name || '')}" placeholder="比如：猫三联（第三针）">`) +
         field('接种日期', `<input type="date" name="date" value="${todayISO()}" required>`) +
-        field('下次接种日期', `<input type="date" name="nextDate">`, '留空则不提醒') +
-        field('医院', `<input name="hospital" placeholder="比如：北碚仁爱动物医院">`) +
+        field('下次接种日期', `<input type="date" name="nextDate" value="${nextPreset}">`, '已按一年周期自动填好，可改') +
+        field('医院', `<input name="hospital" value="${esc(last?.hospital || pet.hospital || '')}" placeholder="比如：北碚仁爱动物医院">`) +
         field('疫苗批号', `<input name="batch" placeholder="选填">`),
       onSubmit(d) {
         if (!d.name) { toast('请填写疫苗名称', '⚠️'); return false; }
@@ -245,27 +278,42 @@ const FORMS = {
       },
     });
   },
+
   deworm(pet, after) {
+    const lastIn = store.lastRecord(pet.id, 'deworm', '体内');
+    const lastOut = store.lastRecord(pet.id, 'deworm', '体外');
     openModal({
       title: '添加驱虫记录',
       body:
         field('类型', selectHTML('kind', [['体内', '体内驱虫'], ['体外', '体外驱虫']], '体内')) +
         field('驱虫日期', `<input type="date" name="date" value="${todayISO()}" required>`) +
-        field('下次日期', `<input type="date" name="nextDate">`, '猫狗通常每月一次') +
-        field('使用药品', `<input name="product" placeholder="比如：拜宠清 / 大宠爱">`),
+        field('下次日期', `<input type="date" name="nextDate" value="${store.suggestNext('deworm', '体内', todayISO())}">`, '已按 30 天周期自动填好，可改') +
+        field('使用药品', `<input name="product" value="${esc(lastIn?.product || lastOut?.product || '')}" placeholder="比如：拜宠清 / 大宠爱">`),
       onSubmit(d) {
         store.addRecord({ petId: pet.id, type: 'deworm', kind: d.kind, date: d.date, nextDate: d.nextDate || '', product: d.product });
         toast(`${d.kind}驱虫已记录`);
         after();
       },
     });
+
+    // 切换体内/体外时，同步更新预填的下次日期与药品
+    const form = document.getElementById('modal-form');
+    if (form) {
+      const sel = form.querySelector('[name="kind"]');
+      sel?.addEventListener('change', () => {
+        const last = sel.value === '体内' ? lastIn : lastOut;
+        form.querySelector('[name="nextDate"]').value = store.suggestNext('deworm', sel.value, todayISO());
+        form.querySelector('[name="product"]').value = last?.product || '';
+      });
+    }
   },
+
   vet(pet, after) {
     openModal({
       title: '添加就诊记录',
       body:
         field('就诊日期', `<input type="date" name="date" value="${todayISO()}" required>`) +
-        field('医院', `<input name="hospital" required placeholder="比如：北碚仁爱动物医院">`) +
+        field('医院', `<input name="hospital" required value="${esc(pet.hospital || '')}" placeholder="比如：北碚仁爱动物医院">`) +
         field('症状', `<textarea name="symptom" required placeholder="比如：连续两天软便、食欲下降"></textarea>`) +
         field('诊断结果', `<input name="diagnosis" required placeholder="比如：轻度肠胃炎">`) +
         field('花费 (元)', `<input type="number" name="cost" min="0" step="1" placeholder="比如：320">`),
@@ -321,6 +369,26 @@ export default function health(el) {
     el.querySelectorAll('[data-pet]').forEach((b) =>
       b.addEventListener('click', () => { store.setActivePet(b.dataset.pet); health(el); }));
     el.querySelector('#add-rec').addEventListener('click', () => FORMS[tab](pet, render));
+
+    // 一键顺延：今天做了 → 直接生成新记录，下次日期按周期算好
+    el.querySelectorAll('[data-done]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const type = b.dataset.type;
+        const kind = b.dataset.kind || undefined;
+        const today = todayISO();
+        const next = store.suggestNext(type, kind, today);
+        store.addRecord({
+          petId: pet.id,
+          type,
+          kind,
+          name: b.dataset.name || undefined,
+          product: b.dataset.product || undefined,
+          date: today,
+          nextDate: next,
+        });
+        toast(`已记录 · 下次 ${fmtDate(next, false)}`);
+        render();
+      }));
   };
 
   render();

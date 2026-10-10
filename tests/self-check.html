@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<title>t</title>
+<link rel="stylesheet" href="../css/tokens.css">
+<link rel="stylesheet" href="../css/app.css">
+</head>
+<body>
+<div id="erx"></div>
+<pre id="txt"></pre>
+<pre id="report"></pre>
+
+<script type="module">
+import * as store from '../js/store.js';
+import { emergencyCard, emergencyText } from '../js/views/pet.js';
+
+const out = [];
+const ok  = (n, c, extra='') => out.push(`${c ? 'PASS' : 'FAIL'} | ${n}${extra ? ' | ' + extra : ''}`);
+
+store.init();
+const pet = store.activePet();
+
+/* 1. 就医卡渲染 */
+const html = emergencyCard(pet);
+document.getElementById('erx').innerHTML = html;
+ok('就医卡：含过敏史', html.includes('过敏史'));
+ok('就医卡：过敏内容红字', html.includes('erx__sec--alert') && html.includes('青霉素'));
+ok('就医卡：含芯片号', html.includes('156 0001 2345 6789'));
+ok('就医卡：含疫苗史', html.includes('猫三联'));
+
+/* 2. 就医文本导出 */
+const text = emergencyText(pet);
+document.getElementById('txt').textContent = text;
+ok('就医文本：非空且含关键行', text.includes('过敏史') && text.includes('驱虫史'), `${text.split('\n').length} 行`);
+
+/* 3. 时间线自动聚合 */
+const tl = store.timelineOf(pet.id);
+const auto = tl.filter(t => t.auto);
+const manual = tl.filter(t => !t.auto);
+ok('时间线：自动节点已生成', auto.length > 0, `自动 ${auto.length} / 手动 ${manual.length}`);
+ok('时间线：倒序排列', tl.every((t, i) => i === 0 || tl[i-1].date >= t.date));
+
+/* 3b. 体重按月折叠：同月多条 → 1 个节点 */
+store.addRecord({ petId: pet.id, type: 'weight', date: '2026-10-01', value: 4.7 });
+store.addRecord({ petId: pet.id, type: 'weight', date: '2026-10-09', value: 4.8 });
+const wNodes = store.timelineOf(pet.id).filter(t => t.kind === 'weight' && t.date.startsWith('2026-10'));
+ok('时间线：同月体重折叠为 1 个节点', wNodes.length === 1, `${wNodes.length} 个`);
+ok('时间线：折叠节点展示区间', !!wNodes[0] && /4\.7/.test(wNodes[0].text) && /4\.8/.test(wNodes[0].text), wNodes[0]?.text || '');
+
+/* 3c. 今天必须是本地日期，不是 UTC 日期 */
+const now = new Date();
+const localToday = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+ok('todayISO 用本地时区', store.todayISO() === localToday, `${store.todayISO()} vs ${localToday}`);
+
+/* 4. 周期推算 */
+const next = store.suggestNext('deworm', '体内', '2026-03-01');
+ok('周期推算：驱虫 +30 天', next === '2026-03-31', next);
+const nextV = store.suggestNext('vaccine', null, '2026-03-01');
+ok('周期推算：疫苗 +365 天', nextV === '2027-03-01', nextV);
+
+/* 5. 一键顺延：记录数 +1 且下次日期后移 */
+const before = store.get().records.length;
+const rem = store.reminders(pet.id)[0];
+store.completeReminder(pet.id, rem, '2026-10-10');
+const after = store.get().records.length;
+ok('一键顺延：新增一条记录', after === before + 1, `${before} -> ${after}`);
+const newest = store.recordsOf(pet.id).find(r => r.date === '2026-10-10');
+ok('一键顺延：下次日期已按周期推算', newest && !!newest.nextDate, newest?.nextDate || 'none');
+
+/* 6. 导出 → 破坏 → 导入 往返一致 */
+store.init();
+const snapshot = store.exportJSON();
+const petsBefore = store.get().pets.length;
+store.update(s => { s.pets = []; s.records = []; });
+const r = store.importJSON(snapshot);
+ok('备份往返：宠物数恢复', store.get().pets.length === petsBefore, `${r.pets} 只 · ${r.records} 条记录`);
+
+/* 7. 旧版本数据兼容（缺新字段不应崩溃） */
+const legacy = {
+  activePetId: 'old1',
+  pets: [{ id: 'old1', name: '老数据', emoji: '🐱', species: '猫', breed: '中华田园猫',
+           gender: '公', neutered: true, birthday: '2020-01-01', weight: 4 }],
+  records: [{ id: 'x1', petId: 'old1', type: 'weight', date: '2026-01-01', value: 4 }],
+  timeline: [], friends: [], posts: [], activities: [],
+};
+try {
+  store.importJSON(JSON.stringify(legacy));
+  const p = store.activePet();
+  ok('旧数据兼容：不崩溃', true);
+  ok('旧数据兼容：过敏史补齐为空串', p.allergies === '', JSON.stringify(p.allergies));
+  ok('旧数据兼容：时间线可渲染', store.timelineOf(p.id).length >= 1);
+} catch (e) {
+  ok('旧数据兼容：不崩溃', false, e.message);
+}
+
+/* 8. 导入坏文件应报错而非静默 */
+try {
+  store.importJSON('{"not":"pawlog"}');
+  ok('坏文件被拒绝', false, '竟然接受了');
+} catch (e) {
+  ok('坏文件被拒绝', true, e.message);
+}
+
+document.getElementById('report').textContent =
+  out.join('\n') + `\n\n===== ${out.filter(l => l.startsWith('PASS')).length}/${out.length} PASS =====`;
+document.title = out.some(l => l.startsWith('FAIL')) ? 'TESTS_FAILED' : 'TESTS_OK';
+</script>
+</body>
+</html>

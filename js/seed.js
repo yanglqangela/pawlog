@@ -3,12 +3,21 @@
    日期相对「今天」生成，保证提醒/倒计时看起来永远新鲜
    ============================================================ */
 
-const DAY = 86400000;
+const iso = (d) =>
+  `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 
-/** n 天前的 ISO 日期（YYYY-MM-DD） */
-const ago = (n) => new Date(Date.now() - n * DAY).toISOString().slice(0, 10);
-/** n 天后的 ISO 日期 */
-const ahead = (n) => new Date(Date.now() + n * DAY).toISOString().slice(0, 10);
+/** 相对今天偏移 n 天（本地时区，不能用 toISOString —— 那是 UTC，会差一天） */
+const shift = (n) => {
+  const d = new Date();
+  d.setHours(0, 0, 0, 0);
+  d.setDate(d.getDate() + n);
+  return iso(d);
+};
+
+/** n 天前的日期（YYYY-MM-DD） */
+const ago = (n) => shift(-n);
+/** n 天后的日期 */
+const ahead = (n) => shift(n);
 
 export function buildSeed() {
   const pets = [
@@ -24,6 +33,11 @@ export function buildSeed() {
       weight: 4.8,
       color: 'brand',
       bio: '三年前的雨天在楼下捡到的，现在已经是家里的一把手了。最爱纸箱和冻干。',
+      allergies: '青霉素类 — 注射后曾出现面部肿胀',
+      chipNo: '156 0001 2345 6789',
+      hospital: '北碚仁爱动物医院',
+      weightGoal: 4.6,
+      neuteredDate: ago(700),
     },
     {
       id: 'p_zhima',
@@ -37,6 +51,11 @@ export function buildSeed() {
       weight: 9.2,
       color: 'mint',
       bio: '精力旺盛的小短腿，每天必须遛满两次，闻到别的狗就走不动道。',
+      allergies: '无已知过敏',
+      chipNo: '156 0009 8765 4321',
+      hospital: '渝北宠康动物医院',
+      weightGoal: 10.5,
+      neuteredDate: '',
     },
   ];
 

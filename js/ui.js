@@ -17,6 +17,7 @@ const PATHS = {
   pin:    'M12 21.5s-7-6-7-11.2A7 7 0 1 1 19 10.3c0 5.2-7 11.2-7 11.2zM12 12.6a2.3 2.3 0 1 0 0-4.6 2.3 2.3 0 0 0 0 4.6z',
   chat:   'M21 11.7A8.4 8.4 0 0 1 12.2 20a9 9 0 0 1-2.8-.5L4 21l1.6-4.6A8.4 8.4 0 0 1 12.2 3.3 8.4 8.4 0 0 1 21 11.7z',
   user:   'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
+  me:     'M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2M12 11a4 4 0 1 0 0-8 4 4 0 0 0 0 8z',
   plus:   'M12 5v14M5 12h14',
   close:  'M6 6l12 12M18 6L6 18',
   check:  'M20 6 9 17l-5-5',
@@ -50,14 +51,17 @@ export function hydrateIcons(root = document) {
 
 /* ---------- 格式化 ---------- */
 export function fmtDate(iso, withYear = true) {
-  const d = new Date(iso + 'T00:00:00');
+  const d = new Date(String(iso) + 'T00:00:00');
   if (Number.isNaN(d.getTime())) return iso || '—';
   const y = d.getFullYear(), m = d.getMonth() + 1, day = d.getDate();
   return withYear ? `${y}年${m}月${day}日` : `${m}月${day}日`;
 }
 
 export function relDate(iso) {
-  const n = Math.round((Date.now() - new Date(iso + 'T00:00:00').getTime()) / 86400000);
+  const d = new Date(String(iso) + 'T00:00:00');
+  if (Number.isNaN(d.getTime())) return '—';
+  const t = new Date(); t.setHours(0, 0, 0, 0);
+  const n = Math.round((t - d) / 86400000);
   if (n <= 0) return '今天';
   if (n === 1) return '昨天';
   if (n < 30) return `${n} 天前`;
@@ -65,7 +69,11 @@ export function relDate(iso) {
   return `${Math.floor(n / 365)} 年前`;
 }
 
-export const todayISO = () => new Date().toISOString().slice(0, 10);
+/** 本地时区的今天 —— 不要用 toISOString()，那是 UTC 日期 */
+export const todayISO = () => {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+};
 
 /* ---------- Toast ---------- */
 export function toast(msg, ico = '✓') {
@@ -145,6 +153,8 @@ export function openModal({ title, body, submit = '保存', onSubmit, footer }) 
   // 自动聚焦第一个输入
   const first = root.querySelector('input, textarea, select');
   if (first) setTimeout(() => first.focus(), 60);
+
+  return root.querySelector('[data-form]')?.closest('.modal__panel') || root;
 }
 
 /** 生成一个字段块的 HTML */

@@ -41,8 +41,12 @@ function heroHTML(pet, pets) {
         </div>
         <div>
           <div class="stat__label">成长瞬间</div>
-          <div class="stat__value">${store.timelineOf(pet.id).length}<small>个</small></div>
+          <div class="stat__value">${store.timelineOf(pet.id).filter((t) => !t.auto).length}<small>个</small></div>
         </div>
+      </div>
+      <div class="row" style="gap:8px;margin-top:var(--sp-4);position:relative;flex-wrap:wrap">
+        <a class="btn btn--soft btn--sm" href="#/pet/${esc(pet.id)}">查看完整档案</a>
+        <a class="btn btn--ghost btn--sm" href="#/health">记一笔健康数据</a>
       </div>
     </div>`;
 }
@@ -61,9 +65,12 @@ function remindersHTML(petId) {
         <div class="reminder__title">${esc(r.title)}</div>
         <div class="reminder__sub">${esc(r.sub || '')} · 下次 ${esc(fmtDate(r.date, false))}</div>
       </div>
-      <div class="reminder__when" style="color:${
-        r.level === 'due' ? 'var(--c-rose)' : r.level === 'soon' ? 'var(--c-sun)' : 'var(--c-mint)'
-      }">${esc(r.text)}</div>
+      <div class="col" style="align-items:flex-end;gap:6px;flex:none">
+        <div class="reminder__when" style="color:${
+          r.level === 'due' ? 'var(--c-rose)' : r.level === 'soon' ? 'var(--c-sun)' : 'var(--c-mint)'
+        }">${esc(r.text)}</div>
+        <button class="btn btn--soft btn--sm" data-done="${esc(r.id)}">今天做了 ✓</button>
+      </div>
     </div>`).join('')}</div>`;
 }
 
@@ -108,7 +115,7 @@ function nearbyHTML() {
 }
 
 function momentsHTML(petId) {
-  const list = store.timelineOf(petId).slice(0, 2);
+  const list = store.timelineOf(petId).filter((t) => !t.auto).slice(0, 2);
   if (!list.length) {
     return `<div class="empty"><div class="empty__ico">📸</div>
       <div class="empty__title">还没有成长记录</div>
@@ -191,6 +198,17 @@ export default function dashboard(el) {
 
   const addBtn = el.querySelector('#add-pet');
   if (addBtn) addBtn.addEventListener('click', () => openAddPet(() => dashboard(el)));
+
+  // 待办一键完成：今天做了 → 直接顺延，不用进表单
+  el.querySelectorAll('[data-done]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const pet = store.activePet();
+      const r = store.reminders(pet.id).find((x) => x.id === b.dataset.done);
+      if (!r) return;
+      store.completeReminder(pet.id, r, todayISO());
+      toast(`${r.title} 已记录 · 下次 ${fmtDate(store.suggestNext(r.type, r.kind, todayISO()), false)}`);
+      dashboard(el);
+    }));
 }
 
 export function openAddPet(after) {
