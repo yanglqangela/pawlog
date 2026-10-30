@@ -1,6 +1,6 @@
 # 爪迹 PawLog — 项目状态
 
-> 更新时间：2026-10-30 · 当前版本：**M3** · 分支：`main` · 提交：`9a57724`
+> 更新时间：2026-10-30 · 当前版本：**M3** · 分支：`main` · 代码提交：`9a57724`
 > 线上地址：https://yanglqangela.github.io/pawlog/ （GitHub Pages，构建状态 `built`）
 > 自检页：[tests/self-check.html](https://yanglqangela.github.io/pawlog/tests/self-check.html)
 > 相关文档：[README](README.md) · [M3 方案](PLAN-M3.md) · [M3 实施方案](IMPLEMENTATION-M3.md)
