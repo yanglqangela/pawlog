@@ -6,28 +6,28 @@
   --c-surface-2: #FDFBF8;
 
   --c-ink:       #2B2622;
-  --c-ink-2:     #6B625A;
-  --c-ink-3:     #A0958C;
-  --c-ink-4:     #C9C1B9;
+  --c-ink-2:     #5F564E;
+  --c-ink-3:     #6F665E;
+  --c-ink-4:     #756B62;
 
   --c-line:      #EDE7E0;
   --c-line-soft: #F4EFE9;
 
   /* 品牌：蜜橘 */
-  --c-brand:      #F2734F;
-  --c-brand-deep: #D95A38;
+  --c-brand:      #C24A2B;
+  --c-brand-deep: #A93E22;
   --c-brand-soft: #FFF0EA;
 
   /* 语义色 */
-  --c-mint:       #2FAE97;
+  --c-mint:       #1A6F62;
   --c-mint-soft:  #E6F6F2;
-  --c-sun:        #DE9412;
+  --c-sun:        #8F5C00;
   --c-sun-soft:   #FDF2DF;
-  --c-rose:       #D9527A;
+  --c-rose:       #9E274B;
   --c-rose-soft:  #FDECF2;
-  --c-lilac:      #7C6BC4;
+  --c-lilac:      #5B4AA0;
   --c-lilac-soft: #F0EDFB;
-  --c-sky:        #3D8BD4;
+  --c-sky:        #2A5F96;
   --c-sky-soft:   #E7F1FB;
 
   /* ---- 字号 ---- */
@@ -36,8 +36,17 @@
   --fs-h2:      17px;
   --fs-h3:      15px;
   --fs-body:    14px;
-  --fs-sm:      13px;
-  --fs-xs:      11.5px;
+  --fs-sm:      13.5px;
+  --fs-xs:      12px;
+
+  /* 大字模式（老年用户 / 无障碍） */
+  --fs-display-lg: 34px;
+  --fs-h1-lg:      26px;
+  --fs-h2-lg:      20px;
+  --fs-h3-lg:      17px;
+  --fs-body-lg:    16px;
+  --fs-sm-lg:      15px;
+  --fs-xs-lg:      13px;
 
   /* ---- 间距 ---- */
   --sp-1: 4px;  --sp-2: 8px;  --sp-3: 12px; --sp-4: 16px;

@@ -56,3 +56,8 @@ export function start() {
   window.addEventListener('hashchange', render);
   render();
 }
+
+/** 外部数据变更后重绘当前路由（不改变 hash） */
+export function rerender() {
+  render();
+}

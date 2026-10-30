@@ -2,7 +2,7 @@
    社区 — 动态流 / 话题广场 / 发布 / 互动
    ============================================================ */
 import * as store from '../store.js';
-import { esc, relDate, fmtDate, toast, openModal, field } from '../ui.js';
+import { esc, relDate, fmtDate, todayISO, toast, openModal, field } from '../ui.js';
 
 let topic = '全部';
 
@@ -17,10 +17,12 @@ function postCard(p, st) {
       <div class="post__head">
         <div class="avatar">${esc(avatar)}</div>
         <div class="grow">
-          <div class="post__name">${esc(p.name)}</div>
+          <div class="row" style="gap:6px;flex-wrap:wrap">
+            <span class="post__name">${esc(p.name)}</span>
+            ${p.demo ? '<span class="tag tag--sun">演示</span>' : ''}
+          </div>
           <div class="post__meta">${esc(p.city)} · ${esc(relDate(p.time))}</div>
         </div>
-        <button class="btn btn--ghost btn--sm" data-follow-post="${esc(p.name)}">关注</button>
       </div>
 
       <p class="post__body">${esc(p.text)}</p>
@@ -33,14 +35,14 @@ function postCard(p, st) {
 
       <div class="post__foot">
         <button class="post__act ${p.liked ? 'is-on' : ''}" data-like="${esc(p.id)}">
-          ${p.liked ? '❤️' : '🤍'} <span>${p.likes}</span>
+          ${p.liked ? '❤️' : '🤍'} <span>${esc(p.likes || 0)}</span>
         </button>
-        <button class="post__act" data-comment="${esc(p.id)}">💬 <span>${p.comments.length}</span></button>
+        <button class="post__act" data-comment="${esc(p.id)}">💬 <span>${esc((p.comments || []).length)}</span></button>
         <button class="post__act" data-share="${esc(p.id)}">↗ 分享</button>
       </div>
 
-      ${p.comments.length ? `<div class="stack" style="margin-top:var(--sp-4);padding-top:var(--sp-3);border-top:1px solid var(--c-line-soft);gap:9px">
-        ${p.comments.map((c) => `
+      ${(p.comments || []).length ? `<div class="stack" style="margin-top:var(--sp-4);padding-top:var(--sp-3);border-top:1px solid var(--c-line-soft);gap:9px">
+        ${(p.comments || []).map((c) => `
           <div class="row" style="align-items:flex-start;gap:9px">
             <div class="avatar" style="width:26px;height:26px;font-size:14px">🙂</div>
             <div class="grow">
@@ -53,6 +55,28 @@ function postCard(p, st) {
     </article>`;
 }
 
+async function sharePost(p) {
+  const text = `${p.name}：${p.text}\n—— 来自爪迹 PawLog`;
+  if (navigator.share) {
+    try {
+      await navigator.share({ title: '爪迹 PawLog', text });
+    } catch { /* 用户取消分享，不提示 */ }
+    return;
+  }
+  try {
+    await navigator.clipboard.writeText(text);
+    toast('分享文案已复制');
+  } catch {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    try { document.execCommand('copy'); toast('分享文案已复制'); }
+    catch { toast('复制失败，请手动选择', '⚠️'); }
+    ta.remove();
+  }
+}
+
 export default function community(el) {
   const st = store.get();
 
@@ -63,7 +87,7 @@ export default function community(el) {
   el.innerHTML = `
     <div class="page-head">
       <h1>社区</h1>
-      <p>看看同城家长今天都在分享什么</p>
+      <p>演示内容仅供体验；真实发布的内容会保留在本机</p>
     </div>
 
     <button class="composer" id="compose" style="margin-bottom:var(--sp-5)">
@@ -78,7 +102,7 @@ export default function community(el) {
       </div>
 
       <div class="section__head">
-        <h2>${topic === '全部' ? '最新动态' : '#' + topic}</h2>
+        <h2>${topic === '全部' ? '最新动态' : '#' + esc(topic)}</h2>
         <span class="xs muted">${list.length} 条</span>
       </div>
 
@@ -100,13 +124,9 @@ export default function community(el) {
     b.addEventListener('click', () => { store.toggleLike(b.dataset.like); community(el); }));
 
   el.querySelectorAll('[data-share]').forEach((b) =>
-    b.addEventListener('click', () => toast('分享链接已复制（演示）')));
-
-  el.querySelectorAll('[data-follow-post]').forEach((b) =>
     b.addEventListener('click', () => {
-      const on = b.textContent === '已关注';
-      b.textContent = on ? '关注' : '已关注';
-      toast(on ? '已取消关注' : `已关注 ${b.dataset.followPost}`);
+      const p = store.get().posts.find((x) => x.id === b.dataset.share);
+      if (p) sharePost(p);
     }));
 
   el.querySelectorAll('[data-comment]').forEach((b) =>
@@ -124,7 +144,7 @@ export default function community(el) {
           ${field('你的评论', `<textarea name="text" maxlength="160" placeholder="友善交流，文明养宠～"></textarea>`)}`,
         onSubmit(d) {
           if (!d.text?.trim()) { toast('评论不能为空', '⚠️'); return false; }
-          store.addComment(id, { name: store.get().me.name, text: d.text.trim(), time: new Date().toISOString().slice(0, 10) });
+          store.addComment(id, { name: store.get().me.name, text: d.text.trim(), time: todayISO() });
           toast('评论已发布');
           community(el);
         },
@@ -147,7 +167,7 @@ export default function community(el) {
           name: store.get().me.name,
           emoji: store.get().me.emoji,
           city: d.city || '重庆',
-          time: new Date().toISOString().slice(0, 10),
+          time: todayISO(),
           text: d.text.trim(),
           imgs: (d.imgs || '').split(/\s+/).filter(Boolean).slice(0, 3),
           tags: (d.tags || '').split(/\s+/).filter(Boolean).slice(0, 4),

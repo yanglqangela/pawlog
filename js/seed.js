@@ -19,6 +19,14 @@ const ago = (n) => shift(-n);
 /** n 天后的日期 */
 const ahead = (n) => shift(n);
 
+/** 本地日期时间，用于症状记录（YYYY-MM-DDTHH:MM） */
+const at = (n, h, m = 0) => {
+  const d = new Date();
+  d.setDate(d.getDate() + n);
+  d.setHours(h, m, 0, 0);
+  return `${iso(d)}T${String(h).padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+};
+
 export function buildSeed() {
   const pets = [
     {
@@ -29,13 +37,21 @@ export function buildSeed() {
       breed: '中华田园猫（橘）',
       gender: '公',
       neutered: true,
-      birthday: ago(930),
+      birthday: ago(2800),
       weight: 4.8,
       color: 'brand',
-      bio: '三年前的雨天在楼下捡到的，现在已经是家里的一把手了。最爱纸箱和冻干。',
+      bio: '两年多前的雨天在楼下捡到的，现在已经是家里的一把手了。最爱纸箱和冻干。',
       allergies: '青霉素类 — 注射后曾出现面部肿胀',
+      chronic: '慢性肾病早期（示例诊断）',
       chipNo: '156 0001 2345 6789',
+      registrationNo: 'CQ-DEMO-2024-0186',
       hospital: '北碚仁爱动物医院',
+      hospitalPhone: '023-6888 1234',
+      emergencyContact: '家人：138 0000 1111',
+      feeding: '早晚各 30g 湿粮 + 少量肾脏处方干粮；饮水每天换两次。',
+      habits: '怕生，到新环境先让它在小房间待一会儿；喜欢纸箱。',
+      noGos: '不要喂牛奶、人食和零食；不要用香水/精油。',
+      seniorMode: true,
       weightGoal: 4.6,
       neuteredDate: ago(700),
     },
@@ -54,6 +70,10 @@ export function buildSeed() {
       allergies: '无已知过敏',
       chipNo: '156 0009 8765 4321',
       hospital: '渝北宠康动物医院',
+      hospitalPhone: '023-6788 5678',
+      feeding: '每天两顿，每顿 80g 犬粮；运动后少量补水。',
+      habits: '精力旺，需要每天遛两次；见狗容易兴奋。',
+      noGos: '不要松开牵引绳；不要喂鸡骨/巧克力。',
       weightGoal: 10.5,
       neuteredDate: '',
     },
@@ -68,16 +88,16 @@ export function buildSeed() {
     { id: 'r_w5', petId: 'p_buding', type: 'weight', date: ago(60),  value: 4.9 },
     { id: 'r_w6', petId: 'p_buding', type: 'weight', date: ago(7),   value: 4.8 },
 
-    /* ── 布丁 · 疫苗 ── */
-    { id: 'r_v1', petId: 'p_buding', type: 'vaccine', date: ago(365), name: '猫三联（第三针）', hospital: '北碚仁爱动物医院', nextDate: ahead(15), batch: 'FVRCP-2411' },
-    { id: 'r_v2', petId: 'p_buding', type: 'vaccine', date: ago(365), name: '狂犬疫苗', hospital: '北碚仁爱动物医院', nextDate: ahead(15), batch: 'RAB-2409' },
+    /* ── 布丁 · 疫苗（7 天内的下一个待办）── */
+    { id: 'r_v1', petId: 'p_buding', type: 'vaccine', date: ago(358), name: '猫三联（第三针）', hospital: '北碚仁爱动物医院', nextDate: ahead(7), batch: 'FVRCP-2411' },
+    { id: 'r_v2', petId: 'p_buding', type: 'vaccine', date: ago(358), name: '狂犬疫苗', hospital: '北碚仁爱动物医院', nextDate: ahead(7), batch: 'RAB-2409' },
 
-    /* ── 布丁 · 驱虫 ── */
-    { id: 'r_d1', petId: 'p_buding', type: 'deworm', date: ago(88), kind: '体内', product: '拜宠清', nextDate: ahead(2) },
+    /* ── 布丁 · 驱虫（体内已逾期，作为演示开场红条）── */
+    { id: 'r_d1', petId: 'p_buding', type: 'deworm', date: ago(33), kind: '体内', product: '拜宠清', nextDate: ago(3) },
     { id: 'r_d2', petId: 'p_buding', type: 'deworm', date: ago(20), kind: '体外', product: '大宠爱', nextDate: ahead(10) },
 
     /* ── 布丁 · 就诊 ── */
-    { id: 'r_vt1', petId: 'p_buding', type: 'vet', date: ago(140), hospital: '北碚仁爱动物医院', symptom: '连续两天软便、食欲下降', diagnosis: '轻度肠胃炎', cost: 320 },
+    { id: 'r_vt1', petId: 'p_buding', type: 'vet', date: ago(140), hospital: '北碚仁爱动物医院', symptom: '连续两天软便、食欲下降', diagnosis: '轻度肠胃炎', cost: 320, followUp: ahead(4) },
 
     /* ── 芝麻 ── */
     { id: 'r_z1', petId: 'p_zhima', type: 'weight', date: ago(200), value: 6.4 },
@@ -105,8 +125,8 @@ export function buildSeed() {
       photos: ['🐾'], tags: ['技能点'],
     },
     {
-      id: 't4', petId: 'p_buding', date: ago(180), milestone: true, title: '一岁生日 🎂',
-      text: '买了个三文鱼罐头顶上插了根猫条当蜡烛。一整年从 0.4kg 长到 4.4kg，体检一切正常。',
+      id: 't4', petId: 'p_buding', date: ago(180), milestone: true, title: '七岁生日 🎂',
+      text: '买了个三文鱼罐头顶上插了根猫条当蜡烛。体检发现肾功能指标偏高，开始定期复查和控量喂食。',
       photos: ['🎂', '🐟'], tags: ['生日'],
     },
     {
@@ -191,6 +211,20 @@ export function buildSeed() {
         { name: '阿茶和橘座', text: '看图血压升高了哈哈哈哈', time: ago(4) },
       ],
     },
+    {
+      id: 'po6', author: 'f2', name: '陈小满', emoji: '🐶', city: '重庆·北碚区', time: ago(1),
+      text: '国庆要回老家 5 天，北碚滨江路附近求靠谱上门喂养。\n满仔怕生但熟悉之后很粘人，可以按次付费，有附近的家长能帮忙吗？',
+      imgs: ['🧳', '🐕'], tags: ['寄养互助', '北碚区'],
+      likes: 31, liked: false, comments: [
+        { name: '研究所养猫人', text: '我在西大，私信！', time: ago(1) },
+      ],
+    },
+    {
+      id: 'po7', author: 'f1', name: '阿茶和橘座', emoji: '🐱', city: '重庆·北碚区', time: ago(0),
+      text: '【寻猫】西大附近，昨晚 22:00 从阳台溜出去的，橘白，戴蓝色项圈。\n如果有看到请先拍照片联系我，不会追它，怕它跑得更远。',
+      imgs: ['🚨', '🐱'], tags: ['寻宠', '西大'],
+      likes: 46, liked: false, comments: [],
+    },
   ];
 
   const activities = [
@@ -202,6 +236,63 @@ export function buildSeed() {
       date: ahead(9), time: '14:00', joined: 21, cap: 30, tags: ['柯基', '比赛'] },
   ];
 
+  const medications = [
+    {
+      id: 'm_buding_1', petId: 'p_buding',
+      name: '肾脏支持片（示例处方）', dose: '1', unit: '片',
+      frequency: '每日一次', times: ['08:00'],
+      startDate: ago(30), endDate: ahead(30),
+      reason: '慢性肾病早期支持', prescriber: '北碚仁爱动物医院',
+      note: '演示数据，不构成用药建议；请按兽医处方使用。', active: true,
+    },
+  ];
+
+  const symptoms = [
+    {
+      id: 'sy_buding_1', petId: 'p_buding', at: at(0, 6, 10),
+      vomiting: '2–3 次', diarrhea: '无', appetite: '减少', energy: '沉郁',
+      water: '增多', urination: '正常', breathing: '正常', pain: 2,
+      note: '凌晨吐了两次，精神一般。', redFlags: [],
+    },
+    {
+      id: 'sy_buding_2', petId: 'p_buding', at: at(0, 8, 30),
+      vomiting: '无', diarrhea: '无', appetite: '减少', energy: '正常',
+      water: '增多', urination: '正常', breathing: '正常', pain: 1,
+      note: '早上只吃了几口，饮水比平时多。', redFlags: [],
+    },
+  ];
+
+  const expenses = [
+    { id: 'e_buding_1', petId: 'p_buding', date: ago(140), category: '药品', amount: 120, note: '肠胃炎用药' },
+    { id: 'e_buding_2', petId: 'p_buding', date: ago(15), category: '检查', amount: 260, note: '肾功能复查' },
+    { id: 'e_buding_3', petId: 'p_buding', date: ago(15), category: '药品', amount: 180, note: '肾脏支持用药' },
+  ];
+
+  const policies = [
+    {
+      id: 'pol_buding_1', petId: 'p_buding',
+      company: '示例保险', policyNo: 'DEMO-2026-001',
+      start: ago(120), end: ahead(245),
+      coverage: '门诊 / 住院（示例，不构成投保建议）',
+      claimPhone: '400-000-0000', note: '演示数据，非真实保单。',
+    },
+  ];
+
+  const qol = [
+    { id: 'q_buding_1', petId: 'p_buding', date: ago(28), scores: { hurt: 3, hunger: 8, hydration: 7, hygiene: 8, happiness: 8, mobility: 8, goodDays: 7 }, note: '开始记录生活质量。' },
+    { id: 'q_buding_2', petId: 'p_buding', date: ago(21), scores: { hurt: 2, hunger: 8, hydration: 8, hygiene: 8, happiness: 8, mobility: 7, goodDays: 8 }, note: '食欲比上周好一些。' },
+    { id: 'q_buding_3', petId: 'p_buding', date: ago(14), scores: { hurt: 2, hunger: 7, hydration: 8, hygiene: 7, happiness: 8, mobility: 7, goodDays: 7 }, note: '复查前一周，饮水偏多。' },
+    { id: 'q_buding_4', petId: 'p_buding', date: ago(7), scores: { hurt: 1, hunger: 8, hydration: 8, hygiene: 8, happiness: 9, mobility: 8, goodDays: 8 }, note: '这周精神不错。' },
+  ];
+
+  const places = [
+    { id: 'pl_1', name: '北碚滨江路', type: '遛狗', city: '重庆', district: '北碚区', address: '滨江路沿线', note: '傍晚人多，请牵绳并清理粪便。', source: '示例数据', demo: true },
+    { id: 'pl_2', name: '西大宠物友好咖啡（示例）', type: '咖啡 / 餐厅', city: '重庆', district: '北碚区', address: '西南大学附近', note: '户外座位可带宠，进店前先电话确认。', source: '示例数据', demo: true },
+    { id: 'pl_3', name: '中央公园草坪', type: '公园', city: '重庆', district: '渝北区', address: '中央公园', note: '建议避开儿童活动区，随身带水。', source: '示例数据', demo: true },
+    { id: 'pl_4', name: '渝北宠康动物医院', type: '宠物医院', city: '重庆', district: '渝北区', address: '渝北区（示例地址）', note: '芝麻的常去医院。', source: '示例数据', demo: true },
+    { id: 'pl_5', name: '北碚宠物友好民宿（示例）', type: '住宿', city: '重庆', district: '北碚区', address: '缙云山附近', note: '需提前说明宠物品种和体重。', source: '示例数据', demo: true },
+  ];
+
   const me = {
     name: '我',
     emoji: '🙂',
@@ -210,5 +301,13 @@ export function buildSeed() {
     bio: '两猫一狗……不对，是一猫一狗的新手家长，正在努力学习科学喂养。',
   };
 
-  return { pets, records, timeline, friends, posts, activities, me, activePetId: 'p_buding' };
+  return {
+    pets, records, timeline,
+    friends: friends.map((f) => ({ ...f, demo: true })),
+    posts: posts.map((p) => ({ ...p, demo: true })),
+    activities: activities.map((a) => ({ ...a, demo: true })),
+    places,
+    medications, symptoms, expenses, policies, qol,
+    me, activePetId: 'p_buding',
+  };
 }

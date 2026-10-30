@@ -1,0 +1,50 @@
+{
+  "name": "爪迹 PawLog · 宠物健康档案",
+  "short_name": "爪迹",
+  "description": "记录疫苗、驱虫、体重与就诊；急诊时一屏拿得出，离线也能看。数据只在本机。",
+  "lang": "zh-CN",
+  "dir": "ltr",
+  "start_url": "./#/dashboard",
+  "scope": "./",
+  "id": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#FBF9F6",
+  "theme_color": "#C24A2B",
+  "categories": ["health", "lifestyle", "productivity"],
+  "icons": [
+    {
+      "src": "./icons/icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any"
+    },
+    {
+      "src": "./icons/icon-maskable-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "maskable"
+    }
+  ],
+  "shortcuts": [
+    {
+      "name": "急救 / 就医信息",
+      "short_name": "急救",
+      "description": "过敏、用药、疫苗与最近就诊一屏看完",
+      "url": "./?erx=1#/dashboard",
+      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }]
+    },
+    {
+      "name": "健康档案",
+      "short_name": "健康",
+      "url": "./#/health",
+      "icons": [{ "src": "./icons/icon-192.png", "sizes": "192x192" }]
+    }
+  ]
+}

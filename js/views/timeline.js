@@ -2,7 +2,7 @@
    成长时光 — 自动聚合健康记录 + 手动补充瞬间 + 里程碑
    ============================================================ */
 import * as store from '../store.js';
-import { esc, fmtDate, relDate, todayISO, toast, openModal, field } from '../ui.js';
+import { esc, fmtDate, relDate, todayISO, toast, openModal, closeModal, field, num } from '../ui.js';
 
 let filter = 'all';   // all | milestone | health | moment
 
@@ -23,7 +23,7 @@ function applyFilter(list) {
 }
 
 function statsHTML(pet, all) {
-  const days = Math.floor((Date.now() - new Date(pet.birthday).getTime()) / 86400000);
+  const days = store.togetherDays(pet);
   const manual = all.filter((t) => !t.auto);
   const ms = manual.filter((t) => t.milestone).length;
   const auto = all.filter((t) => t.auto).length;
@@ -37,7 +37,7 @@ function statsHTML(pet, all) {
 
   return `
     <div class="grid grid--3" style="margin-bottom:var(--sp-5)">
-      ${tile('📅', '陪伴天数', days, '天', `${fmtDate(pet.birthday)} 出生`)}
+      ${tile('📅', '陪伴天数', days == null ? '—' : days, '天', `${fmtDate(pet.birthday)} 出生`)}
       ${tile('📸', '我记录的瞬间', manual.length, '条', ms ? `其中 ${ms} 个里程碑` : '还没有里程碑')}
       ${tile('🔄', '自动汇入', auto, '条', '来自健康档案')}
     </div>`;
@@ -56,7 +56,7 @@ function autoNodeHTML(t) {
             </div>
             <p class="tl__text">${esc(t.text)}</p>
             ${(t.weights || []).length ? `<div class="tl__weight-chips">
-              ${t.weights.map((w) => `<span class="tl__weight-chip">${esc(fmtDate(w.date, false))} · ${w.value}kg</span>`).join('')}
+              ${t.weights.map((w) => `<span class="tl__weight-chip">${esc(fmtDate(w.date, false))} · ${esc(num(w.value))}kg</span>`).join('')}
             </div>` : ''}
           </div>
         </div>
@@ -82,11 +82,16 @@ function autoNodeHTML(t) {
 function manualNodeHTML(t) {
   return `
     <div class="tl__card">
-      <div class="row" style="gap:7px;flex-wrap:wrap">
-        ${t.milestone ? '<span class="tag tag--sun">🏅 里程碑</span>' : ''}
-        ${(t.tags || []).filter((x) => x !== '第一个里程碑').map((x) => `<span class="tag">#${esc(x)}</span>`).join('')}
+      <div class="row row--between" style="align-items:flex-start;gap:8px">
+        <div class="grow">
+          <div class="row" style="gap:7px;flex-wrap:wrap">
+            ${t.milestone ? '<span class="tag tag--sun">🏅 里程碑</span>' : ''}
+            ${(t.tags || []).filter((x) => x !== '第一个里程碑').map((x) => `<span class="tag">#${esc(x)}</span>`).join('')}
+          </div>
+          <div class="tl__title" style="margin-top:7px">${esc(t.title)}</div>
+        </div>
+        <button class="btn btn--ghost list__menu" data-tl-menu="${esc(t.id)}" title="编辑或删除" aria-label="编辑或删除这条记录">⋯</button>
       </div>
-      <div class="tl__title" style="margin-top:7px">${esc(t.title)}</div>
       <p class="tl__text">${esc(t.text)}</p>
       ${(t.photos || []).length ? `<div class="tl__photos">${t.photos.map((p) => `<div class="tl__photo">${esc(p)}</div>`).join('')}</div>` : ''}
     </div>`;
@@ -118,7 +123,7 @@ export function shareCard(pet) {
   const all = store.timelineOf(pet.id);
   const ms = all.filter((t) => !t.auto && t.milestone);
   const manual = all.filter((t) => !t.auto);
-  const days = Math.floor((Date.now() - new Date(pet.birthday).getTime()) / 86400000);
+  const days = store.daysSince(pet.birthday);
   const weights = store.recordsOf(pet.id, 'weight');
   const latest = weights[0];
 
@@ -135,11 +140,11 @@ export function shareCard(pet) {
         </div>
         <div style="display:flex;gap:26px;margin-top:20px;padding-top:16px;border-top:1px dashed #EBD9CC">
           <div><div style="font-size:11px;color:var(--c-ink-3);font-weight:600">一起走过</div>
-            <div style="font-size:19px;font-weight:730">${days} <span style="font-size:11px;color:var(--c-ink-3)">天</span></div></div>
+            <div style="font-size:19px;font-weight:730">${days == null ? '—' : days} <span style="font-size:11px;color:var(--c-ink-3)">天</span></div></div>
           <div><div style="font-size:11px;color:var(--c-ink-3);font-weight:600">成长瞬间</div>
             <div style="font-size:19px;font-weight:730">${manual.length} <span style="font-size:11px;color:var(--c-ink-3)">个</span></div></div>
           <div><div style="font-size:11px;color:var(--c-ink-3);font-weight:600">当前体重</div>
-            <div style="font-size:19px;font-weight:730">${latest ? latest.value : '—'} <span style="font-size:11px;color:var(--c-ink-3)">kg</span></div></div>
+            <div style="font-size:19px;font-weight:730">${latest ? esc(num(latest.value)) : '—'} <span style="font-size:11px;color:var(--c-ink-3)">kg</span></div></div>
         </div>
       </div>
       <div style="padding:18px 24px 22px">
@@ -209,6 +214,11 @@ export default function timeline(el) {
     b.addEventListener('click', () => { store.setActivePet(b.dataset.pet); timeline(el); }));
   el.querySelectorAll('[data-f]').forEach((b) =>
     b.addEventListener('click', () => { filter = b.dataset.f; timeline(el); }));
+  el.querySelectorAll('[data-tl-menu]').forEach((b) =>
+    b.addEventListener('click', () => {
+      const entry = store.get().timeline.find((t) => t.id === b.dataset.tlMenu);
+      if (entry) openMomentActions(pet, entry, () => timeline(el));
+    }));
 
   el.querySelector('#add-tl').addEventListener('click', () => openAddMoment(pet, () => timeline(el)));
 
@@ -221,7 +231,7 @@ export default function timeline(el) {
     });
     document.getElementById('copy-share').addEventListener('click', () => {
       const manual = store.timelineOf(pet.id).filter((t) => !t.auto);
-      const text = `来看看 ${pet.name} 的成长记录🐾 已经陪伴 ${Math.floor((Date.now() - new Date(pet.birthday).getTime()) / 86400000)} 天，记录了 ${manual.length} 个瞬间。— 来自爪迹 PawLog`;
+      const text = `来看看 ${pet.name} 的成长记录🐾 已经陪伴 ${store.daysSince(pet.birthday) ?? '—'} 天，记录了 ${manual.length} 个瞬间。— 来自爪迹 PawLog`;
       navigator.clipboard?.writeText(text).then(
         () => toast('分享文案已复制'),
         () => toast('复制失败，请手动选择', '⚠️'),
@@ -230,23 +240,54 @@ export default function timeline(el) {
   });
 }
 
-export function openAddMoment(pet, after) {
+function openMomentActions(pet, entry, after) {
+  const panel = openModal({
+    title: '成长记录',
+    footer: `<button class="btn btn--ghost" data-close>关闭</button>
+             <button class="btn btn--danger" id="tl-del">删除</button>
+             <button class="btn btn--primary" id="tl-edit">编辑</button>`,
+    body: `<div class="card card--pad" style="background:var(--c-surface-2);box-shadow:none">
+      <div class="strong">${esc(entry.title)}</div>
+      <div class="xs muted" style="margin-top:4px">${esc(fmtDate(entry.date))}${entry.milestone ? ' · 🏅 里程碑' : ''}</div>
+      ${entry.text ? `<p class="small" style="color:var(--c-ink-2);margin-top:10px">${esc(entry.text)}</p>` : ''}
+    </div>`,
+  });
+
+  panel.querySelector('#tl-edit')?.addEventListener('click', () => {
+    closeModal();
+    openAddMoment(pet, after, entry);
+  });
+
+  panel.querySelector('#tl-del')?.addEventListener('click', () => {
+    const deleted = store.deleteTimeline(entry.id);
+    closeModal();
+    after();
+    if (deleted) {
+      toast('已删除成长记录', '🗑️', {
+        label: '撤销',
+        onClick: () => { store.restoreTimeline(deleted); after(); toast('已恢复记录'); },
+      });
+    }
+  });
+}
+
+export function openAddMoment(pet, after, entry = null) {
   openModal({
-    title: `记录 ${pet.name} 的瞬间`,
+    title: entry ? `编辑 ${pet.name} 的瞬间` : `记录 ${pet.name} 的瞬间`,
     submit: '保存',
     body:
-      field('标题', `<input name="title" required maxlength="24" placeholder="比如：第一次学会握手">`) +
-      field('日期', `<input type="date" name="date" value="${todayISO()}" required>`) +
-      field('记录点什么', `<textarea name="text" maxlength="300" placeholder="当时发生了什么？它的反应是什么样的？"></textarea>`) +
-      field('配图', `<input name="photos" maxlength="40" placeholder="贴几个 emoji，用空格分开">`, '比如 🐾 🎂 📸（M3 将支持上传真实照片）') +
-      field('标签', `<input name="tags" maxlength="60" placeholder="用空格分开，比如：技能点 训练">`) +
+      field('标题', `<input name="title" required maxlength="24" value="${esc(entry?.title || '')}" placeholder="比如：第一次学会握手">`) +
+      field('日期', `<input type="date" name="date" value="${esc(entry?.date || todayISO())}" required>`) +
+      field('记录点什么', `<textarea name="text" maxlength="300" placeholder="当时发生了什么？它的反应是什么样的？">${esc(entry?.text || '')}</textarea>`) +
+      field('配图', `<input name="photos" maxlength="40" value="${esc((entry?.photos || []).join(' '))}" placeholder="贴几个 emoji，用空格分开">`, '比如 🐾 🎂 📸（M3 将支持上传真实照片）') +
+      field('标签', `<input name="tags" maxlength="60" value="${esc((entry?.tags || []).join(' '))}" placeholder="用空格分开，比如：技能点 训练">`) +
       `<label class="row" style="gap:8px;cursor:pointer;align-items:center">
-         <input type="checkbox" name="milestone" style="width:auto">
+         <input type="checkbox" name="milestone" style="width:auto" ${entry?.milestone ? 'checked' : ''}>
          <span class="small strong">标记为里程碑 🏅（会出现在分享卡片里）</span>
        </label>`,
     onSubmit(d) {
       if (!d.title) { toast('请填写标题', '⚠️'); return false; }
-      store.addTimeline({
+      const data = {
         petId: pet.id,
         date: d.date,
         title: d.title,
@@ -254,8 +295,14 @@ export function openAddMoment(pet, after) {
         photos: (d.photos || '').split(/\s+/).filter(Boolean).slice(0, 4),
         tags: (d.tags || '').split(/\s+/).filter(Boolean),
         milestone: d.milestone === 'on',
-      });
-      toast('已加入成长时光 📸');
+      };
+      if (entry) {
+        store.updateTimeline(entry.id, data);
+        toast('成长记录已更新');
+      } else {
+        store.addTimeline(data);
+        toast('已加入成长时光 📸');
+      }
       if (after) after();
     },
   });

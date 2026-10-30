@@ -75,28 +75,122 @@ export const todayISO = () => {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
 
+/** 数字兜底：导入数据里的 value 可能是任意字符串 */
+export function num(v, fallback = '—') {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+/**
+ * 过敏史显示：只有“整句就是简单否定”才归一化为「无已知过敏」。
+ * 「无过敏史，但对鸡肉过敏」这类带补充说明的句子必须原样保留。
+ */
+export function allergyStatus(raw) {
+  const text = String(raw ?? '').trim();
+  if (!text) return { text: '未填写 · 请询问主人', unknown: true, has: false };
+  if (/^(无|没有|暂无|无已知过敏|无过敏史|没有过敏|暂无过敏)[。.!！]?$/.test(text)) {
+    return { text: '无已知过敏', unknown: false, has: false };
+  }
+  return { text, unknown: false, has: true };
+}
+
 /* ---------- Toast ---------- */
-export function toast(msg, ico = '✓') {
+export function toast(msg, ico = '✓', action = null) {
   const root = document.getElementById('toast-root');
   if (!root) return;
   const el = document.createElement('div');
   el.className = 'toast';
-  el.innerHTML = `<span>${esc(ico)}</span><span>${esc(msg)}</span>`;
+  el.innerHTML = `<span>${esc(ico)}</span><span class="grow">${esc(msg)}</span>`;
+  if (action?.label) {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'toast__action';
+    btn.textContent = action.label;
+    btn.addEventListener('click', () => {
+      try { action.onClick?.(); } finally { el.remove(); }
+    });
+    el.appendChild(btn);
+  }
   root.appendChild(el);
   setTimeout(() => {
     el.classList.add('is-out');
     setTimeout(() => el.remove(), 220);
-  }, 2200);
+  }, action?.label ? 5000 : 2200);
+}
+
+/* ---------- 复制 / 分享 ---------- */
+export async function copyText(text, okMsg = '已复制') {
+  const fallback = () => {
+    const ta = document.createElement('textarea');
+    ta.value = text;
+    document.body.appendChild(ta);
+    ta.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch { ok = false; }
+    ta.remove();
+    if (ok) {
+      toast(okMsg);
+      return true;
+    }
+    toast('复制失败，请长按选择文本', '⚠️');
+    return false;
+  };
+  const p = navigator.clipboard?.writeText?.(text);
+  if (p && typeof p.then === 'function') {
+    try { await p; toast(okMsg); return true; }
+    catch { return fallback(); }
+  }
+  return fallback();
+}
+
+export async function shareText({ title = '爪迹 PawLog', text, okMsg = '已复制，可粘贴分享' }) {
+  if (navigator.share) {
+    try { await navigator.share({ title, text }); return true; }
+    catch { return false; } // 用户取消分享，不强行复制
+  }
+  return copyText(text, okMsg);
+}
+
+/* ---------- 打印指定 HTML（理赔材料包等） ---------- */
+export function printHTML(html, title = '') {
+  const old = document.getElementById('print-only');
+  if (old) old.remove();
+  const div = document.createElement('div');
+  div.id = 'print-only';
+  div.className = 'print-only';
+  div.innerHTML = `<h1>${esc(title)}</h1>${html}`;
+  document.body.appendChild(div);
+  document.body.classList.add('printing-custom');
+  const cleanup = () => {
+    div.remove();
+    document.body.classList.remove('printing-custom');
+    window.removeEventListener('afterprint', cleanup);
+  };
+  window.addEventListener('afterprint', cleanup);
+  setTimeout(() => {
+    window.print();
+    setTimeout(cleanup, 1500);
+  }, 50);
 }
 
 /* ---------- 弹窗 ---------- */
 let escHandler = null;
+let trapHandler = null;
+let focusGuard = null;
+let lastFocus = null;
 
 export function closeModal() {
   const root = document.getElementById('modal-root');
   if (root) root.innerHTML = '';
   if (escHandler) { document.removeEventListener('keydown', escHandler); escHandler = null; }
-  document.body.style.overflow = '';
+  if (trapHandler) { document.removeEventListener('keydown', trapHandler); trapHandler = null; }
+  if (focusGuard) { document.removeEventListener('focusin', focusGuard); focusGuard = null; }
+  // 还有全屏就医卡时不要解锁页面滚动
+  if (!document.querySelector('.erx-screen')) document.body.style.overflow = '';
+  if (lastFocus && typeof lastFocus.focus === 'function') {
+    try { lastFocus.focus(); } catch { /* ignore */ }
+  }
+  lastFocus = null;
 }
 
 /**
@@ -107,11 +201,12 @@ export function closeModal() {
  * @param {(data:object)=>void} [o.onSubmit] 提交回调，返回 false 则保持弹窗打开
  * @param {string} [o.footer]   自定义底部 HTML（覆盖默认按钮）
  */
-export function openModal({ title, body, submit = '保存', onSubmit, footer }) {
+export function openModal({ title, body, submit = '保存', onSubmit, footer, sheet = false }) {
   const root = document.getElementById('modal-root');
+  lastFocus = document.activeElement;
   root.innerHTML = `
-    <div class="modal" data-backdrop>
-      <div class="modal__panel" role="dialog" aria-modal="true" aria-label="${esc(title)}">
+    <div class="modal${sheet ? ' modal--sheet' : ''}" data-backdrop>
+      <div class="modal__panel" role="dialog" aria-modal="true" aria-label="${esc(title)}" tabindex="-1">
         <div class="modal__head">
           <h2>${esc(title)}</h2>
           <button class="btn btn--ghost btn--icon" data-close aria-label="关闭">✕</button>
@@ -140,6 +235,39 @@ export function openModal({ title, body, submit = '保存', onSubmit, footer }) 
   escHandler = (e) => { if (e.key === 'Escape') closeModal(); };
   document.addEventListener('keydown', escHandler);
 
+  // 焦点陷阱：Tab 只在弹窗内循环
+  const panel = root.querySelector('.modal__panel');
+  trapHandler = (e) => {
+    if (e.key !== 'Tab' || !panel) return;
+    const items = [...panel.querySelectorAll(
+      'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    )].filter((el) => el.offsetParent !== null);
+    if (!items.length) return;
+    const first = items[0];
+    const last = items[items.length - 1];
+    if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+    else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+  };
+  document.addEventListener('keydown', trapHandler);
+
+  // 没有表单控件（确认框/海报）时，把焦点放到面板或第一个按钮
+  const firstControl = root.querySelector('input, textarea, select');
+  const firstButton = panel?.querySelector('button, a[href]');
+  setTimeout(() => {
+    if (firstControl) firstControl.focus();
+    else if (firstButton) firstButton.focus();
+    else panel?.focus();
+  }, 60);
+
+  // 焦点守卫：任何情况下都不允许 Tab/点击把焦点留在背景页
+  focusGuard = (e) => {
+    if (panel && !panel.contains(e.target)) {
+      e.stopPropagation();
+      (firstButton || panel).focus();
+    }
+  };
+  document.addEventListener('focusin', focusGuard);
+
   // 提交按钮在 form 之外，通过 form="modal-form" 关联；这里只补一次程序化提交兜底
   if (form && onSubmit) {
     form.addEventListener('submit', (e) => {
@@ -157,11 +285,16 @@ export function openModal({ title, body, submit = '保存', onSubmit, footer }) 
   return root.querySelector('[data-form]')?.closest('.modal__panel') || root;
 }
 
-/** 生成一个字段块的 HTML */
+/** 生成一个字段块的 HTML（label 与第一个控件通过 id 关联） */
+let fieldSeq = 0;
 export function field(label, inputHTML, hint) {
+  const html = String(inputHTML ?? '');
+  const hasId = /\bid=/.test(html);
+  const id = hasId ? null : `field-${++fieldSeq}`;
+  const withId = id ? html.replace(/<(input|textarea|select)\b/i, `<$1 id="${id}"`) : html;
   return `<div class="field">
-    <label>${esc(label)}</label>
-    ${inputHTML}
+    <label${id ? ` for="${id}"` : ''}>${esc(label)}</label>
+    ${withId}
     ${hint ? `<span class="field__hint">${esc(hint)}</span>` : ''}
   </div>`;
 }

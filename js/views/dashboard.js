@@ -2,15 +2,21 @@
    首页 — 今日待办 / 宠物概览 / 健康速览 / 最近瞬间 / 附近宠友
    ============================================================ */
 import * as store from '../store.js';
+import * as router from '../router.js';
 import { esc, relDate, fmtDate, todayISO, toast, openModal, field, selectHTML, icon } from '../ui.js';
+import { openRecordForm } from '../record-forms.js';
+import { exportICS } from '../ics.js';
+import { memorialBanner } from './senior.js';
+import { lostBanner, mountLost } from './lost.js';
 
 function heroHTML(pet, pets) {
   const recs = store.recordsOf(pet.id);
   const weights = recs.filter((r) => r.type === 'weight');
   const first = weights[weights.length - 1];
   const latest = weights[0];
-  const gained = first && latest ? (latest.value - first.value).toFixed(1) : null;
-  const days = Math.floor((Date.now() - new Date(pet.birthday).getTime()) / 86400000);
+  const gainedNum = first && latest ? Number(latest.value) - Number(first.value) : null;
+  const gained = gainedNum == null ? null : `${gainedNum > 0 ? '+' : ''}${gainedNum.toFixed(1)}`;
+  const days = store.togetherDays(pet);
 
   return `
     <div class="pet-hero">
@@ -22,7 +28,7 @@ function heroHTML(pet, pets) {
             <span class="tag tag--${esc(pet.color || 'brand')}">${esc(pet.species)}</span>
           </div>
           <div class="pet-hero__meta">${esc(pet.breed)} · ${esc(pet.gender)} · ${esc(pet.neutered ? '已绝育' : '未绝育')}</div>
-          <div class="pet-hero__meta">${esc(store.ageText(pet.birthday))} · 陪伴你 ${days} 天</div>
+          <div class="pet-hero__meta">${esc(store.ageText(pet.birthday))} · 陪伴你 ${days == null ? '—' : days} 天</div>
         </div>
       </div>
       ${pet.bio ? `<p class="pet-hero__bio">${esc(pet.bio)}</p>` : ''}
@@ -33,7 +39,7 @@ function heroHTML(pet, pets) {
         </div>
         <div>
           <div class="stat__label">累计增重</div>
-          <div class="stat__value">${gained ? `+${gained}` : '—'}<small>kg</small></div>
+          <div class="stat__value">${gained ?? '—'}<small>kg</small></div>
         </div>
         <div>
           <div class="stat__label">健康记录</div>
@@ -74,6 +80,30 @@ function remindersHTML(petId) {
     </div>`).join('')}</div>`;
 }
 
+/* 首页「记一笔」：不用先想清楚去哪一页，点一下就开始 */
+const QUICK_ACTIONS = [
+  ['weight', '⚖️', '体重', '记录今天的数字'],
+  ['vaccine', '💉', '疫苗', '接种后记一笔'],
+  ['deworm', '🐛', '驱虫', '体内 / 体外'],
+  ['vet', '🏥', '就诊', '症状、诊断与花费'],
+  ['symptom', '🌡️', '症状', '呕吐 / 食欲 / 精神'],
+  ['medication', '💊', '用药', '今日服药打卡'],
+];
+
+function quickRecordHTML() {
+  return `<div class="grid grid--4 quick-grid">
+    ${QUICK_ACTIONS.map(([type, ico, label, sub]) => `
+      <button class="quick-record" data-quick="${esc(type)}" type="button">
+        <span class="quick-record__ico" aria-hidden="true">${ico}</span>
+        <span class="grow" style="text-align:left">
+          <span class="quick-record__label">${esc(label)}</span>
+          <span class="quick-record__sub">${esc(sub)}</span>
+        </span>
+        <span class="quick-record__plus" aria-hidden="true">＋</span>
+      </button>`).join('')}
+  </div>`;
+}
+
 function tilesHTML(petId) {
   const recs = store.recordsOf(petId);
   const latestOf = (t) => recs.find((r) => r.type === t);
@@ -99,18 +129,34 @@ function tilesHTML(petId) {
 
 function nearbyHTML() {
   const st = store.get();
-  const near = [...st.friends].sort((a, b) => a.distance - b.distance).slice(0, 4);
+  const me = st.me;
+  if (!st.friends.length) {
+    return `<div class="empty card card--pad"><div class="empty__ico">📍</div>
+      <div class="empty__title">附近暂时没有宠友</div>
+      <div class="empty__text">演示内容已清空；可以到「附近与出行」添加地点或生成互助文案</div></div>`;
+  }
+  const near = [...st.friends]
+    .sort((a, b) => (
+      Number(b.city === me.city && b.district === me.district)
+      - Number(a.city === me.city && a.district === me.district)
+    ) || a.name.localeCompare(b.name, 'zh'))
+    .slice(0, 4);
+  const loc = (f) => f.city === me.city && f.district === me.district ? '同区'
+    : f.city === me.city ? '同城' : f.city;
   return `<div class="grid grid--auto">${near.map((f) => `
     <a class="card card--pad" href="#/nearby">
       <div class="friend__head">
         <div class="avatar avatar--lg" style="background:var(--c-bg-warm)">${esc(f.emoji)}</div>
         <div class="grow">
-          <div class="friend__name">${esc(f.name)}</div>
-          <div class="friend__loc">📍 ${esc(f.city)}·${esc(f.district)} · ${f.distance}km</div>
+          <div class="row" style="gap:6px;flex-wrap:wrap">
+            <span class="friend__name">${esc(f.name)}</span>
+            ${f.demo ? '<span class="tag tag--sun">演示</span>' : ''}
+          </div>
+          <div class="friend__loc">📍 ${esc(f.city)}·${esc(f.district)} · ${esc(loc(f))}</div>
         </div>
       </div>
       <p class="friend__bio" style="display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden">${esc(f.bio)}</p>
-      <div class="friend__pets">${f.pets.map((p) => `<span class="tag">${esc(p.species)} · ${esc(p.breed)}</span>`).join('')}</div>
+      <div class="friend__pets">${(f.pets || []).map((p) => `<span class="tag">${esc(p.species)} · ${esc(p.breed)}</span>`).join('')}</div>
     </a>`).join('')}</div>`;
 }
 
@@ -140,6 +186,21 @@ function momentsHTML(petId) {
 export default function dashboard(el) {
   const st = store.get();
   const pet = store.activePet();
+  const lost = store.lostOf();
+  const lostPet = lost?.active ? store.petById(lost.petId) : null;
+
+  if (!pet) {
+    el.innerHTML = `
+      <div class="page-head"><h1>欢迎来到爪迹</h1><p>先为家里的小家伙建一份档案吧</p></div>
+      <div class="empty card card--pad">
+        <div class="empty__ico">🐾</div>
+        <div class="empty__title">还没有宠物档案</div>
+        <div class="empty__text">添加后就能记录体重、疫苗、驱虫与就诊</div>
+        <button class="btn btn--primary" id="add-first" style="margin-top:var(--sp-4)">＋ 添加宠物</button>
+      </div>`;
+    el.querySelector('#add-first').addEventListener('click', () => openAddPet(() => dashboard(el)));
+    return;
+  }
 
   el.innerHTML = `
     <div class="page-head">
@@ -156,15 +217,30 @@ export default function dashboard(el) {
       <button class="chip" id="add-pet">＋ 添加宠物</button>
     </div>` : ''}
 
-    <div class="section">${heroHTML(pet, st.pets)}</div>
+    ${lostPet ? lostBanner(lostPet) : ''}
 
+    ${pet.deceased ? memorialBanner(pet) : `
     <div class="section">
       <div class="section__head">
-        <h2>今日待办</h2>
-        <a class="section__more" href="#/health">健康档案 →</a>
+        <h2>今天要做的</h2>
+        <div class="row" style="gap:8px;align-items:center">
+          ${store.reminders(pet.id).length ? '<button class="btn btn--ghost btn--sm" data-ics type="button">📅 加入日历</button>' : ''}
+          <a class="section__more" href="#/health">健康档案 →</a>
+        </div>
       </div>
       ${remindersHTML(pet.id)}
     </div>
+
+    <div class="section">
+      <div class="section__head">
+        <h2>记一笔</h2>
+        <a class="section__more" href="#/health">全部记录 →</a>
+      </div>
+      ${quickRecordHTML()}
+    </div>
+    `}
+
+    <div class="section">${heroHTML(pet, st.pets)}</div>
 
     <div class="section">
       <div class="section__head"><h2>健康速览</h2></div>
@@ -199,14 +275,30 @@ export default function dashboard(el) {
   const addBtn = el.querySelector('#add-pet');
   if (addBtn) addBtn.addEventListener('click', () => openAddPet(() => dashboard(el)));
 
+  el.querySelectorAll('[data-quick]').forEach((b) =>
+    b.addEventListener('click', () => openRecordForm(pet, b.dataset.quick, () => dashboard(el))));
+  el.querySelector('[data-ics]')?.addEventListener('click', () => exportICS(pet));
+  if (lostPet) mountLost(el, lostPet, () => dashboard(el));
+
   // 待办一键完成：今天做了 → 直接顺延，不用进表单
   el.querySelectorAll('[data-done]').forEach((b) =>
     b.addEventListener('click', () => {
       const pet = store.activePet();
       const r = store.reminders(pet.id).find((x) => x.id === b.dataset.done);
       if (!r) return;
-      store.completeReminder(pet.id, r, todayISO());
-      toast(`${r.title} 已记录 · 下次 ${fmtDate(store.suggestNext(r.type, r.kind, todayISO()), false)}`);
+      const res = store.completeReminder(pet.id, r, todayISO());
+      if (res.duplicate) {
+        toast('本周期已打卡，无需重复记录', '⏳');
+        return;
+      }
+      const rerender = () => router.rerender();
+      toast(`${r.title} 已记录 · 下次 ${fmtDate(store.suggestNext(r.type, r.kind, todayISO()), false)}`, '✓', {
+        label: '撤销',
+        onClick: () => {
+          if (res.record) store.deleteRecord(res.record.id);
+          rerender();
+        },
+      });
       dashboard(el);
     }));
 }

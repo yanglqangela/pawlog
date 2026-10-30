@@ -2,7 +2,8 @@
    健康档案 — 体重曲线 / 疫苗 / 驱虫 / 就诊
    ============================================================ */
 import * as store from '../store.js';
-import { esc, fmtDate, relDate, todayISO, toast, openModal, field, selectHTML } from '../ui.js';
+import { esc, fmtDate, relDate, todayISO, toast, openModal, closeModal, num, copyText, printHTML } from '../ui.js';
+import { openRecordForm, openExpenseForm, openPolicyForm } from '../record-forms.js';
 import { openAddPet } from './dashboard.js';
 
 /* 常见品种的标准体重区间（kg）——用于「我家是不是太胖了」的对照 */
@@ -81,7 +82,7 @@ function weightChart(points, range, breedName = '该品种') {
     <text class="chart__label" x="${W - PR}" y="${H - 10}" text-anchor="end">${esc(fmtDate(asc[asc.length - 1].date, false))}</text>`;
 
   return `
-    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="none" role="img" aria-label="体重变化曲线">
+    <svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="体重变化曲线">
       <defs>
         <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
           <stop offset="0%"   stop-color="#F2734F" stop-opacity=".20"/>
@@ -116,7 +117,7 @@ function weightSection(pet) {
     <div class="grid grid--3" style="margin-bottom:var(--sp-4)">
       <div class="tile">
         <div class="tile__top"><span class="tile__label">当前体重</span><span class="tile__ico">⚖️</span></div>
-        <div class="tile__value">${latest ? latest.value : '—'}<small>kg</small></div>
+        <div class="tile__value">${esc(num(latest?.value))}<small>kg</small></div>
         <div class="tile__foot">${
           delta === null ? '暂无对比' :
           delta === 0 ? '与上次持平' :
@@ -143,10 +144,13 @@ function weightSection(pet) {
           <div class="list__item">
             <div class="list__ico">⚖️</div>
             <div class="grow">
-              <div class="list__title">${r.value} kg</div>
+              <div class="list__title">${esc(num(r.value))} kg</div>
               <div class="list__sub">${esc(fmtDate(r.date))}</div>
             </div>
-            <div class="list__right">${esc(relDate(r.date))}</div>
+            <div class="row" style="gap:6px;align-items:center;flex:none">
+              <div class="list__right">${esc(relDate(r.date))}</div>
+              <button class="btn btn--ghost list__menu" data-menu="${esc(r.id)}" title="编辑或删除" aria-label="编辑或删除这条记录">⋯</button>
+            </div>
           </div>`).join('')
         : `<div class="empty"><div class="empty__ico">⚖️</div><div class="empty__title">还没有体重记录</div></div>`}
       </div>
@@ -155,6 +159,7 @@ function weightSection(pet) {
 
 function vaccineSection(pet) {
   const recs = store.recordsOf(pet.id, 'vaccine');
+  const actionableId = recs.find((r) => r.nextDate)?.id;
   return recs.length ? `<div class="card card--flush"><div class="list">${recs.map((r) => {
     const d = r.nextDate ? store.dueText(r.nextDate) : null;
     const color = d ? (d.level === 'due' ? 'var(--c-rose)' : d.level === 'soon' ? 'var(--c-sun)' : 'var(--c-mint)') : 'var(--c-ink-3)';
@@ -167,7 +172,8 @@ function vaccineSection(pet) {
           ${d ? `<div class="xs" style="color:${color};font-weight:650;margin-top:4px">下次接种 ${esc(fmtDate(r.nextDate, false))} · ${esc(d.text)}</div>` : ''}
         </div>
         <div class="col" style="align-items:flex-end;gap:6px;flex:none">
-          ${d ? `<button class="btn btn--soft btn--sm" data-done data-type="vaccine" data-kind="" data-name="${esc(r.name)}" data-product="">今天打了 ✓</button>` : ''}
+          ${d && r.id === actionableId ? `<button class="btn btn--soft btn--sm" data-done="${esc(r.id)}">今天打了 ✓</button>` : ''}
+          <button class="btn btn--ghost list__menu" data-menu="${esc(r.id)}" title="编辑或删除" aria-label="编辑或删除这条记录">⋯</button>
         </div>
       </div>`;
   }).join('')}</div></div>`
@@ -177,6 +183,9 @@ function vaccineSection(pet) {
 
 function dewormSection(pet) {
   const recs = store.recordsOf(pet.id, 'deworm');
+  const actionable = new Set(['体内', '体外']
+    .map((k) => recs.find((r) => r.kind === k && r.nextDate)?.id)
+    .filter(Boolean));
   return recs.length ? `<div class="card card--flush"><div class="list">${recs.map((r) => {
     const d = r.nextDate ? store.dueText(r.nextDate) : null;
     const isIn = r.kind === '体内';
@@ -193,7 +202,8 @@ function dewormSection(pet) {
             下次 ${esc(fmtDate(r.nextDate, false))} · ${esc(d.text)}</div>` : ''}
         </div>
         <div class="col" style="align-items:flex-end;gap:6px;flex:none">
-          ${d ? `<button class="btn btn--soft btn--sm" data-done data-type="deworm" data-kind="${esc(r.kind)}" data-name="" data-product="${esc(r.product || '')}">今天做了 ✓</button>` : ''}
+          ${d && actionable.has(r.id) ? `<button class="btn btn--soft btn--sm" data-done="${esc(r.id)}">今天做了 ✓</button>` : ''}
+          <button class="btn btn--ghost list__menu" data-menu="${esc(r.id)}" title="编辑或删除" aria-label="编辑或删除这条记录">⋯</button>
         </div>
       </div>`;
   }).join('')}</div></div>`
@@ -211,124 +221,412 @@ function vetSection(pet) {
           <div class="list__sub">症状：${esc(r.symptom)}</div>
           <div class="list__sub">${esc(fmtDate(r.date))} · ${esc(r.hospital)}</div>
         </div>
-        ${r.cost ? `<div class="list__right">¥${esc(r.cost)}</div>` : ''}
+        <div class="row" style="gap:6px;align-items:center;flex:none">
+          ${r.cost ? `<div class="list__right">¥${esc(num(r.cost))}</div>` : ''}
+          <button class="btn btn--ghost list__menu" data-menu="${esc(r.id)}" title="编辑或删除" aria-label="编辑或删除这条记录">⋯</button>
+        </div>
       </div>`).join('')}</div></div>`
     : `<div class="empty card card--pad"><div class="empty__ico">🏥</div>
         <div class="empty__title">还没有就诊记录</div><div class="empty__text">希望永远用不上 🍀</div></div>`;
 }
 
-/* ---------- 添加表单 ---------- */
-const FORMS = {
-  weight(pet, after) {
-    // 「沿用上次」直接预填，用户多数时候只要确认一下
-    const last = store.lastRecord(pet.id, 'weight');
-    const preset = last ? last.value : '';
-    openModal({
-      title: `记录 ${pet.name} 的体重`,
-      body:
-        field('体重 (kg)',
-          `<input type="number" name="value" step="0.1" min="0.1" max="120" required value="${preset}" placeholder="比如：4.8">`,
-          last ? `已填上次的 ${last.value}kg（${fmtDate(last.date, false)}），有变化改一下就行` : '') +
-        field('测量日期', `<input type="date" name="date" value="${todayISO()}" required>`) +
-        (last && last.value > 0 ? `
-        <div class="row" style="gap:6px;flex-wrap:wrap">
-          <button type="button" class="chip" data-delta="-0.2">−0.2</button>
-          <button type="button" class="chip" data-delta="-0.1">−0.1</button>
-          <button type="button" class="chip" data-delta="0">保持 ${last.value}</button>
-          <button type="button" class="chip" data-delta="0.1">+0.1</button>
-          <button type="button" class="chip" data-delta="0.2">+0.2</button>
-        </div>` : ''),
-      onSubmit(d) {
-        const v = Number(d.value);
-        if (!(v > 0)) { toast('体重需要大于 0', '⚠️'); return false; }
-        store.addRecord({ petId: pet.id, type: 'weight', value: v, date: d.date });
-        const delta = last ? v - last.value : 0;
-        toast(delta === 0 ? `已记录 ${v}kg` : `已记录 ${v}kg（${delta > 0 ? '+' : ''}${delta.toFixed(1)}）`);
-        after();
-      },
-    });
-
-    // 快捷增减按钮
-    const panel = document.getElementById('modal-form');
-    if (panel && last) {
-      panel.querySelectorAll('[data-delta]').forEach((b) =>
-        b.addEventListener('click', () => {
-          const input = panel.querySelector('[name="value"]');
-          input.value = (Number(last.value) + Number(b.dataset.delta)).toFixed(1);
-        }));
-    }
-  },
-
-  vaccine(pet, after) {
-    const last = store.lastRecord(pet.id, 'vaccine');
-    const nextPreset = last?.nextDate || store.suggestNext('vaccine', null, todayISO());
-    openModal({
-      title: '添加疫苗记录',
-      body:
-        field('疫苗名称', `<input name="name" required value="${esc(last?.name || '')}" placeholder="比如：猫三联（第三针）">`) +
-        field('接种日期', `<input type="date" name="date" value="${todayISO()}" required>`) +
-        field('下次接种日期', `<input type="date" name="nextDate" value="${nextPreset}">`, '已按一年周期自动填好，可改') +
-        field('医院', `<input name="hospital" value="${esc(last?.hospital || pet.hospital || '')}" placeholder="比如：北碚仁爱动物医院">`) +
-        field('疫苗批号', `<input name="batch" placeholder="选填">`),
-      onSubmit(d) {
-        if (!d.name) { toast('请填写疫苗名称', '⚠️'); return false; }
-        store.addRecord({ petId: pet.id, type: 'vaccine', name: d.name, date: d.date, nextDate: d.nextDate || '', hospital: d.hospital, batch: d.batch });
-        toast('疫苗记录已保存');
-        after();
-      },
-    });
-  },
-
-  deworm(pet, after) {
-    const lastIn = store.lastRecord(pet.id, 'deworm', '体内');
-    const lastOut = store.lastRecord(pet.id, 'deworm', '体外');
-    openModal({
-      title: '添加驱虫记录',
-      body:
-        field('类型', selectHTML('kind', [['体内', '体内驱虫'], ['体外', '体外驱虫']], '体内')) +
-        field('驱虫日期', `<input type="date" name="date" value="${todayISO()}" required>`) +
-        field('下次日期', `<input type="date" name="nextDate" value="${store.suggestNext('deworm', '体内', todayISO())}">`, '已按 30 天周期自动填好，可改') +
-        field('使用药品', `<input name="product" value="${esc(lastIn?.product || lastOut?.product || '')}" placeholder="比如：拜宠清 / 大宠爱">`),
-      onSubmit(d) {
-        store.addRecord({ petId: pet.id, type: 'deworm', kind: d.kind, date: d.date, nextDate: d.nextDate || '', product: d.product });
-        toast(`${d.kind}驱虫已记录`);
-        after();
-      },
-    });
-
-    // 切换体内/体外时，同步更新预填的下次日期与药品
-    const form = document.getElementById('modal-form');
-    if (form) {
-      const sel = form.querySelector('[name="kind"]');
-      sel?.addEventListener('change', () => {
-        const last = sel.value === '体内' ? lastIn : lastOut;
-        form.querySelector('[name="nextDate"]').value = store.suggestNext('deworm', sel.value, todayISO());
-        form.querySelector('[name="product"]').value = last?.product || '';
-      });
-    }
-  },
-
-  vet(pet, after) {
-    openModal({
-      title: '添加就诊记录',
-      body:
-        field('就诊日期', `<input type="date" name="date" value="${todayISO()}" required>`) +
-        field('医院', `<input name="hospital" required value="${esc(pet.hospital || '')}" placeholder="比如：北碚仁爱动物医院">`) +
-        field('症状', `<textarea name="symptom" required placeholder="比如：连续两天软便、食欲下降"></textarea>`) +
-        field('诊断结果', `<input name="diagnosis" required placeholder="比如：轻度肠胃炎">`) +
-        field('花费 (元)', `<input type="number" name="cost" min="0" step="1" placeholder="比如：320">`),
-      onSubmit(d) {
-        if (!d.hospital || !d.symptom || !d.diagnosis) { toast('请填写完整', '⚠️'); return false; }
-        store.addRecord({ petId: pet.id, type: 'vet', date: d.date, hospital: d.hospital, symptom: d.symptom, diagnosis: d.diagnosis, cost: Number(d.cost) || 0 });
-        toast('就诊记录已保存');
-        after();
-      },
-    });
-  },
+const fmtDT = (value) => {
+  const d = new Date(value);
+  if (Number.isNaN(d.getTime())) return String(value || '—');
+  return d.toLocaleString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
-const LABELS = { weight: '体重', vaccine: '疫苗', deworm: '驱虫', vet: '就诊' };
+function symptomText(s) {
+  const parts = [];
+  if (s.vomiting && s.vomiting !== '无') parts.push(`呕吐 ${s.vomiting}`);
+  if (s.diarrhea && s.diarrhea !== '无') parts.push(`腹泻 ${s.diarrhea}`);
+  if (s.appetite && s.appetite !== '正常') parts.push(`食欲 ${s.appetite}`);
+  if (s.energy && s.energy !== '正常') parts.push(`精神 ${s.energy}`);
+  if (s.water && s.water !== '正常') parts.push(`饮水 ${s.water}`);
+  if (s.urination && s.urination !== '正常') parts.push(`排尿 ${s.urination}`);
+  if (s.breathing && s.breathing !== '正常') parts.push(`呼吸 ${s.breathing}`);
+  if (Number(s.pain) > 0) parts.push(`疼痛 ${s.pain}/5`);
+  if (s.note) parts.push(s.note);
+  return parts.join(' · ') || '已记录';
+}
+
+function symptomSection(pet) {
+  const list = store.symptomsOf(pet.id).slice(0, 5);
+  return `
+    <div class="section" style="margin-top:var(--sp-6)">
+      <div class="section__head">
+        <h2>最近症状</h2>
+        <button class="btn btn--soft btn--sm" id="symptom-add" type="button">＋ 记录症状</button>
+      </div>
+      ${list.length ? `<div class="card card--flush"><div class="list">${list.map((s) => `
+        <div class="list__item">
+          <div class="list__ico" style="background:var(--c-sun-soft)">🌡️</div>
+          <div class="grow">
+            <div class="list__title">${esc(fmtDT(s.at))}</div>
+            <div class="list__sub">${esc(symptomText(s))}</div>
+            ${(s.redFlags || []).length ? `<div class="tag tag--rose" style="margin-top:5px">🚨 ${esc(s.redFlags[0])}</div>` : ''}
+          </div>
+          <button class="btn btn--ghost list__menu" data-sy-menu="${esc(s.id)}" title="编辑或删除" aria-label="编辑或删除这条症状">⋯</button>
+        </div>`).join('')}</div></div>`
+      : `<div class="empty card card--pad"><div class="empty__ico">🌡️</div>
+          <div class="empty__title">还没有症状记录</div><div class="empty__text">呕吐、食欲、精神变化都可以记一笔</div></div>`}
+    </div>`;
+}
+
+function medicationSection(pet) {
+  const meds = store.medicationsOf(pet.id);
+  const today = todayISO();
+  const todayLogs = store.medicationLogsOf(pet.id, today);
+  const current = meds.filter((m) => m.active && (!m.endDate || m.endDate >= today));
+  const inactive = meds.filter((m) => !m.active || (m.endDate && m.endDate < today));
+  const card = (m) => {
+    const taken = todayLogs.some((l) => l.medId === m.id);
+    const expired = m.endDate && m.endDate < today;
+    const tagText = !m.active ? '已停用' : expired ? '已到期' : '使用中';
+    const tagClass = !m.active ? '' : expired ? 'tag--sun' : 'tag--mint';
+    const meta = [m.dose ? `${m.dose}${m.unit || ''}` : '', m.frequency, m.times?.[0], m.reason]
+      .filter(Boolean).join(' · ');
+    return `
+      <div class="card card--pad">
+        <div class="row row--between" style="gap:10px;align-items:flex-start">
+          <div class="grow">
+            <div class="row" style="gap:6px;flex-wrap:wrap">
+              <span class="strong">${esc(m.name)}</span>
+              <span class="tag ${tagClass}">${tagText}</span>
+            </div>
+            <div class="small muted" style="margin-top:4px">${esc(meta || '—')}</div>
+            ${m.endDate ? `<div class="xs muted" style="margin-top:2px">至 ${esc(fmtDate(m.endDate))}</div>` : ''}
+            ${m.prescriber ? `<div class="xs muted" style="margin-top:2px">开药：${esc(m.prescriber)}</div>` : ''}
+          </div>
+          <div class="col" style="align-items:flex-end;gap:6px;flex:none">
+            ${m.active && !expired ? `<button class="btn btn--${taken ? 'soft' : 'primary'} btn--sm" data-med-toggle="${esc(m.id)}" type="button">${taken ? '今日已服 ✓' : '今日服药打卡'}</button>` : ''}
+            <button class="btn btn--ghost list__menu" data-med-menu="${esc(m.id)}" title="编辑或删除" aria-label="编辑或删除这条用药">⋯</button>
+          </div>
+        </div>
+      </div>`;
+  };
+
+  return `
+    <div class="stack">
+      ${current.length ? current.map(card).join('')
+        : `<div class="empty card card--pad"><div class="empty__ico">💊</div>
+            <div class="empty__title">没有正在使用的药</div><div class="empty__text">按兽医处方记录，复诊时一屏交给医生</div></div>`}
+      ${inactive.length ? `<div class="xs strong muted" style="margin-top:var(--sp-3)">已停用 / 已到期</div>${inactive.map(card).join('')}` : ''}
+    </div>
+    <p class="xs muted" style="margin-top:var(--sp-4)">请按兽医处方使用；本应用不提供剂量建议。</p>`;
+}
+
+function costChart(entries, year) {
+  const months = Array.from({ length: 12 }, (_, i) => `${year}-${String(i + 1).padStart(2, '0')}`);
+  const sums = months.map((m) => entries.filter((e) => e.date.startsWith(m)).reduce((a, e) => a + e.amount, 0));
+  const max = Math.max(...sums, 1);
+  const W = 720, H = 190, PL = 34, PR = 14, PT = 14, PB = 28;
+  const iw = W - PL - PR, ih = H - PT - PB;
+  const step = iw / 12;
+  const bw = step * 0.58;
+  const bars = sums.map((v, i) => {
+    const h = (v / max) * ih;
+    const x = PL + step * i + (step - bw) / 2;
+    const y = PT + ih - h;
+    return `<rect x="${x.toFixed(1)}" y="${y.toFixed(1)}" width="${bw.toFixed(1)}" height="${Math.max(h, 1).toFixed(1)}" rx="3" fill="var(--c-brand)" opacity="${v ? '.85' : '.12'}"><title>${i + 1} 月 · ¥${v}</title></rect>`;
+  }).join('');
+  const labels = sums.map((v, i) => i % 2 === 0
+    ? `<text class="chart__label" x="${(PL + step * i + step / 2).toFixed(1)}" y="${H - 8}" text-anchor="middle">${i + 1}月</text>`
+    : '').join('');
+  return `<svg class="chart" viewBox="0 0 ${W} ${H}" preserveAspectRatio="xMidYMid meet" role="img" aria-label="年度费用柱状图">
+    <line class="chart__grid" x1="${PL}" y1="${PT + ih}" x2="${W - PR}" y2="${PT + ih}"/>
+    ${bars}${labels}
+  </svg>`;
+}
+
+function costSection(pet) {
+  const entries = store.costEntries(pet.id);
+  const policies = store.policiesOf(pet.id);
+  const years = [...new Set(entries.map((e) => e.date.slice(0, 4)))].sort().reverse();
+  if (!years.includes(String(costYear))) costYear = Number(years[0] || new Date().getFullYear());
+  const year = costYear;
+  const yearEntries = entries.filter((e) => e.date.startsWith(String(year)));
+  const total = yearEntries.reduce((a, e) => a + e.amount, 0);
+  const monthKey = todayISO().slice(0, 7);
+  const monthTotal = yearEntries.filter((e) => e.date.startsWith(monthKey)).reduce((a, e) => a + e.amount, 0);
+  const latest = yearEntries[0];
+
+  const cats = new Map();
+  for (const e of yearEntries) cats.set(e.category, (cats.get(e.category) || 0) + e.amount);
+  const catRows = [...cats.entries()].sort((a, b) => b[1] - a[1]);
+  const catHTML = catRows.length ? catRows.map(([k, v]) => `
+    <div class="cost-cat">
+      <div class="row row--between"><span class="small">${esc(k)}</span><b class="small">¥${v}</b></div>
+      <div class="cost-cat__bar"><i style="width:${total ? Math.max(2, (v / total) * 100) : 0}%"></i></div>
+    </div>`).join('') : '<div class="xs muted">本年暂无费用记录</div>';
+
+  const catIcon = { 就诊: '🏥', 药品: '💊', 检查: '🧪', 疫苗: '💉', 驱虫: '🐛', 寄养: '🏠', 其他: '🧾' };
+  const entryRows = yearEntries.slice(0, 8).map((e) => `
+    <div class="list__item">
+      <div class="list__ico">${catIcon[e.category] || '🧾'}</div>
+      <div class="grow">
+        <div class="list__title">${esc(e.category)} · ¥${e.amount}</div>
+        <div class="list__sub">${esc(fmtDate(e.date))}${e.note ? ` · ${esc(e.note)}` : ''}${e.hospital ? ` · ${esc(e.hospital)}` : ''}</div>
+      </div>
+      <button class="btn btn--ghost list__menu" data-cost-menu="${esc(e.id)}" title="编辑或删除" aria-label="编辑或删除这条费用">⋯</button>
+    </div>`).join('');
+
+  return `
+    <div class="row row--between" style="margin-bottom:var(--sp-4)">
+      <div class="xs strong muted">费用统计</div>
+      <select id="cost-year" class="select-inline" aria-label="费用年份">
+        ${(years.length ? years : [String(year)]).map((y) => `<option value="${y}" ${Number(y) === year ? 'selected' : ''}>${y} 年</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="grid grid--3" style="margin-bottom:var(--sp-4)">
+      <div class="tile"><div class="tile__top"><span class="tile__label">${year} 年合计</span><span class="tile__ico">🧾</span></div>
+        <div class="tile__value">¥${total}</div><div class="tile__foot">${yearEntries.length} 笔</div></div>
+      <div class="tile"><div class="tile__top"><span class="tile__label">本月</span><span class="tile__ico">📅</span></div>
+        <div class="tile__value">¥${monthTotal}</div><div class="tile__foot">${monthKey}</div></div>
+      <div class="tile"><div class="tile__top"><span class="tile__label">最近一次</span><span class="tile__ico">💳</span></div>
+        <div class="tile__value">${latest ? `¥${latest.amount}` : '—'}</div><div class="tile__foot">${latest ? esc(fmtDate(latest.date)) : '还没有记录'}</div></div>
+    </div>
+
+    <div class="card card--pad" style="margin-bottom:var(--sp-4)">${costChart(yearEntries, year)}</div>
+
+    <div class="grid grid--2" style="margin-bottom:var(--sp-5)">
+      <div class="card card--pad">
+        <div class="xs strong muted" style="margin-bottom:10px">按类别</div>
+        <div class="stack" style="gap:10px">${catHTML}</div>
+      </div>
+      <div class="card card--pad">
+        <div class="xs strong muted" style="margin-bottom:10px">理赔与保单</div>
+        <div class="row row--wrap" style="gap:8px">
+          <button class="btn btn--primary btn--sm" id="claim-open" type="button">理赔材料包</button>
+          <button class="btn btn--ghost btn--sm" id="policy-add" type="button">＋ 保单</button>
+        </div>
+        ${policies.length ? `<div class="stack" style="gap:8px;margin-top:12px">${policies.map((p) => {
+          const expired = p.end && p.end < todayISO();
+          const soon = p.end && !expired && p.end <= store.addDays(todayISO(), 30);
+          return `
+          <div class="row row--between" style="gap:8px;align-items:center;padding:9px 10px;border:1px solid var(--c-line-soft);border-radius:var(--r-sm)">
+            <div class="grow">
+              <div class="small strong">${esc(p.company)} ${expired ? '<span class="tag tag--rose">已过期</span>' : soon ? '<span class="tag tag--sun">30 天内到期</span>' : ''}</div>
+              <div class="xs muted">${esc(p.policyNo || '—')}${p.end ? ` · 至 ${esc(fmtDate(p.end, false))}` : ''}</div>
+            </div>
+            <button class="btn btn--ghost list__menu" data-policy-menu="${esc(p.id)}" title="编辑或删除" aria-label="编辑或删除保单">⋯</button>
+          </div>`;
+        }).join('')}</div>` : `<div class="xs muted" style="margin-top:10px">未记录保单</div>`}
+        <p class="xs muted" style="margin-top:10px">仅记录材料，不销售保险，不构成投保建议。</p>
+      </div>
+    </div>
+
+    <div class="card card--flush">
+      <div class="list">
+        ${entryRows || `<div class="empty card card--pad"><div class="empty__ico">🧾</div><div class="empty__title">还没有费用记录</div><div class="empty__text">就诊费用会自动计入，也可以手动补录</div></div>`}
+      </div>
+    </div>`;
+}
+
+function openSymptomActions(pet, sy, after) {
+  const panel = openModal({
+    title: '症状记录',
+    footer: `<button class="btn btn--ghost" data-close>关闭</button>
+             <button class="btn btn--danger" id="sy-del">删除</button>
+             <button class="btn btn--primary" id="sy-edit">编辑</button>`,
+    body: `<div class="card card--pad" style="background:var(--c-surface-2);box-shadow:none">
+      <div class="strong">${esc(fmtDT(sy.at))}</div>
+      <div class="small muted" style="margin-top:6px">${esc(symptomText(sy))}</div>
+    </div>`,
+  });
+  panel.querySelector('#sy-edit')?.addEventListener('click', () => {
+    closeModal();
+    openRecordForm(pet, 'symptom', after, sy);
+  });
+  panel.querySelector('#sy-del')?.addEventListener('click', () => {
+    const deleted = store.deleteSymptom(sy.id);
+    closeModal();
+    after();
+    if (deleted) toast('已删除症状记录', '🗑️', { label: '撤销', onClick: () => { store.restoreSymptom(deleted); after(); toast('已恢复记录'); } });
+  });
+}
+
+function openMedicationActions(pet, med, after) {
+  const panel = openModal({
+    title: '用药记录',
+    footer: `<button class="btn btn--ghost" data-close>关闭</button>
+             <button class="btn btn--danger" id="med-del">删除</button>
+             <button class="btn btn--primary" id="med-edit">编辑</button>`,
+    body: `<div class="card card--pad" style="background:var(--c-surface-2);box-shadow:none">
+      <div class="strong">${esc(med.name)}</div>
+      <div class="small muted" style="margin-top:6px">${esc([med.dose && `${med.dose}${med.unit || ''}`, med.frequency, med.reason].filter(Boolean).join(' · ') || '—')}</div>
+    </div>`,
+  });
+  panel.querySelector('#med-edit')?.addEventListener('click', () => {
+    closeModal();
+    openRecordForm(pet, 'medication', after, med);
+  });
+  panel.querySelector('#med-del')?.addEventListener('click', () => {
+    const deleted = store.deleteMedication(med.id);
+    closeModal();
+    after();
+    if (deleted) toast('已删除用药', '🗑️', { label: '撤销', onClick: () => { store.restoreMedication(deleted); after(); toast('已恢复用药'); } });
+  });
+}
+
+function openCostActions(pet, entry, after) {
+  const panel = openModal({
+    title: entry.source === 'vet' ? '就诊费用' : '费用记录',
+    footer: `<button class="btn btn--ghost" data-close>关闭</button>
+             <button class="btn btn--danger" id="cost-del">删除</button>
+             <button class="btn btn--primary" id="cost-edit">编辑</button>`,
+    body: `<div class="card card--pad" style="background:var(--c-surface-2);box-shadow:none">
+      <div class="strong">${esc(entry.category)} · ¥${entry.amount}</div>
+      <div class="small muted" style="margin-top:6px">${esc(fmtDate(entry.date))}${entry.note ? ` · ${esc(entry.note)}` : ''}</div>
+    </div>`,
+  });
+  panel.querySelector('#cost-edit')?.addEventListener('click', () => {
+    closeModal();
+    if (entry.source === 'vet') {
+      const rec = store.get().records.find((r) => r.id === entry.sourceId);
+      if (rec) openRecordForm(pet, 'vet', after, rec);
+    } else {
+      const exp = store.get().expenses.find((e) => e.id === entry.id);
+      if (exp) openExpenseForm(pet, after, exp);
+    }
+  });
+  panel.querySelector('#cost-del')?.addEventListener('click', () => {
+    closeModal();
+    if (entry.source === 'vet') {
+      const deleted = store.deleteRecord(entry.sourceId);
+      after();
+      if (deleted) toast('已删除就诊记录', '🗑️', { label: '撤销', onClick: () => { store.restoreRecord(deleted); after(); toast('已恢复记录'); } });
+    } else {
+      const deleted = store.deleteExpense(entry.id);
+      after();
+      if (deleted) toast('已删除费用', '🗑️', { label: '撤销', onClick: () => { store.restoreExpense(deleted); after(); toast('已恢复费用'); } });
+    }
+  });
+}
+
+function openPolicyActions(pet, policy, after) {
+  const panel = openModal({
+    title: '保单',
+    footer: `<button class="btn btn--ghost" data-close>关闭</button>
+             <button class="btn btn--danger" id="pol-del">删除</button>
+             <button class="btn btn--primary" id="pol-edit">编辑</button>`,
+    body: `<div class="card card--pad" style="background:var(--c-surface-2);box-shadow:none">
+      <div class="strong">${esc(policy.company)} · ${esc(policy.policyNo || '—')}</div>
+      <div class="small muted" style="margin-top:6px">${policy.end ? `至 ${esc(fmtDate(policy.end))}` : '未填写到期日'}${policy.claimPhone ? ` · 理赔 ${esc(policy.claimPhone)}` : ''}</div>
+    </div>`,
+  });
+  panel.querySelector('#pol-edit')?.addEventListener('click', () => {
+    closeModal();
+    openPolicyForm(pet, after, policy);
+  });
+  panel.querySelector('#pol-del')?.addEventListener('click', () => {
+    const deleted = store.deletePolicy(policy.id);
+    closeModal();
+    after();
+    if (deleted) toast('已删除保单', '🗑️', { label: '撤销', onClick: () => { store.addPolicy(deleted); after(); toast('已恢复保单'); } });
+  });
+}
+
+function openClaimPack(pet, year = costYear) {
+  const allEntries = store.costEntries(pet.id);
+  const entries = allEntries.filter((e) => e.date.startsWith(String(year)));
+  const policies = store.policiesOf(pet.id);
+  const total = entries.reduce((a, e) => a + e.amount, 0);
+  const rows = entries.map((e) => `
+    <tr>
+      <td>${esc(fmtDate(e.date))}</td>
+      <td>${esc(e.category)}</td>
+      <td>${esc(e.note || e.hospital || '—')}</td>
+      <td style="text-align:right">¥${e.amount}</td>
+    </tr>`).join('');
+  const policyHTML = policies.length
+    ? policies.map((p) => `<p>${esc(p.company)} · ${esc(p.policyNo || '—')}${p.end ? ` · 至 ${esc(fmtDate(p.end))}` : ''}${p.claimPhone ? ` · 理赔电话 ${esc(p.claimPhone)}` : ''}</p>`).join('')
+    : '<p>未记录保单</p>';
+
+  const claimHTML = `
+    <p>宠物：${esc(pet.name)}（${esc(pet.species || '')}${pet.breed ? ` · ${esc(pet.breed)}` : ''}）</p>
+    <p>费用年度：${year} 年${entries.length ? `（${esc(fmtDate(entries[entries.length - 1].date))} 至 ${esc(fmtDate(entries[0].date))}）` : '（无记录）'}</p>
+    <h2>费用明细</h2>
+    <table><thead><tr><th>日期</th><th>类别</th><th>说明</th><th style="text-align:right">金额</th></tr></thead><tbody>${rows || '<tr><td colspan="4">无费用记录</td></tr>'}</tbody></table>
+    <p><b>合计：¥${total}</b></p>
+    <h2>保单</h2>${policyHTML}
+    <h2>需要准备</h2>
+    <p>发票 / 收据、费用清单、病历摘要、保单信息、主人身份信息；具体以保险公司要求为准。</p>
+    <p class="muted">由爪迹 PawLog 生成，仅整理本机记录，不构成保险或医疗建议。</p>`;
+
+  const text = [
+    `【${pet.name} · ${year} 年理赔材料包】`,
+    `费用明细：`,
+    ...entries.map((e) => `${fmtDate(e.date)} ${e.category} ${e.note || e.hospital || ''} ¥${e.amount}`),
+    `合计：¥${total}`,
+    `保单：${policies.length ? policies.map((p) => `${p.company} ${p.policyNo || ''}`).join('；') : '未记录'}`,
+    `需要准备：发票/收据、费用清单、病历摘要、保单信息、身份信息。`,
+    `— 由爪迹 PawLog 生成，仅供参考`,
+  ].join('\n');
+
+  const panel = openModal({
+    title: `${year} 年理赔材料包`,
+    footer: `<button class="btn btn--ghost" data-close>关闭</button>
+             <button class="btn btn--ghost" id="claim-copy">复制文本</button>
+             <button class="btn btn--primary" id="claim-print">打印 / PDF</button>`,
+    body: `<p class="small" style="color:var(--c-ink-2);line-height:1.8">
+      共 ${entries.length} 笔费用，合计 <b>¥${total}</b>。打印前请确认发票与病历齐全。
+    </p>
+    <div class="card card--pad" style="margin-top:var(--sp-4);background:var(--c-surface-2);box-shadow:none">
+      <div class="xs strong">材料清单</div>
+      <ul class="small" style="margin:8px 0 0;padding-left:18px;line-height:1.9;color:var(--c-ink-2)">
+        <li>费用明细（本页）</li><li>发票 / 收据</li><li>病历摘要</li><li>保单信息</li><li>主人身份信息</li>
+      </ul>
+    </div>`,
+  });
+  panel.querySelector('#claim-copy')?.addEventListener('click', () => copyText(text, '理赔材料清单已复制'));
+  panel.querySelector('#claim-print')?.addEventListener('click', () => printHTML(claimHTML, `${pet.name} · ${year} 年理赔材料包`));
+}
+
+const LABELS = { weight: '体重', vaccine: '疫苗', deworm: '驱虫', vet: '就诊', medication: '用药', cost: '费用' };
 let tab = 'weight';
+let costYear = new Date().getFullYear();
+
+function openRecordActions(pet, rec, after) {
+  const label = LABELS[rec.type] || '记录';
+  const detail = rec.type === 'weight'
+    ? `${num(rec.value)} kg · ${fmtDate(rec.date)}`
+    : rec.type === 'vaccine'
+      ? `${rec.name || '疫苗'} · ${fmtDate(rec.date)}${rec.hospital ? ` · ${rec.hospital}` : ''}`
+      : rec.type === 'deworm'
+        ? `${rec.kind}驱虫 · ${fmtDate(rec.date)}${rec.product ? ` · ${rec.product}` : ''}`
+        : `${rec.diagnosis || '就诊'} · ${fmtDate(rec.date)}${rec.hospital ? ` · ${rec.hospital}` : ''}`;
+
+  const panel = openModal({
+    title: `${label}记录`,
+    footer: `<button class="btn btn--ghost" data-close>关闭</button>
+             <button class="btn btn--danger" id="rec-del">删除</button>
+             <button class="btn btn--primary" id="rec-edit">编辑</button>`,
+    body: `<div class="card card--pad" style="background:var(--c-surface-2);box-shadow:none">
+      <div class="strong">${esc(detail)}</div>
+      ${rec.type === 'vet' && rec.symptom ? `<div class="small muted" style="margin-top:6px">症状：${esc(rec.symptom)}</div>` : ''}
+      ${rec.type === 'vet' && rec.cost ? `<div class="small muted" style="margin-top:4px">花费：¥${esc(num(rec.cost))}</div>` : ''}
+    </div>`,
+  });
+
+  panel.querySelector('#rec-edit')?.addEventListener('click', () => {
+    closeModal();
+    openRecordForm(pet, rec.type, after, rec);
+  });
+
+  panel.querySelector('#rec-del')?.addEventListener('click', () => {
+    const deleted = store.deleteRecord(rec.id);
+    closeModal();
+    after();
+    if (deleted) {
+      toast('已删除记录', '🗑️', {
+        label: '撤销',
+        onClick: () => { store.restoreRecord(deleted); after(); toast('已恢复记录'); },
+      });
+    }
+  });
+}
 
 export default function health(el) {
   const st = store.get();
@@ -340,8 +638,14 @@ export default function health(el) {
       weight: () => weightSection(pet),
       vaccine: () => vaccineSection(pet),
       deworm: () => dewormSection(pet),
-      vet: () => vetSection(pet),
+      vet: () => `${vetSection(pet)}${symptomSection(pet)}`,
+      medication: () => medicationSection(pet),
+      cost: () => costSection(pet),
     }[tab]();
+
+    const addLabel = tab === 'cost' ? '＋ 添加费用'
+      : tab === 'medication' ? '＋ 添加用药'
+        : `＋ 添加${LABELS[tab]}记录`;
 
     el.innerHTML = `
       <div class="page-head">
@@ -355,38 +659,102 @@ export default function health(el) {
       </div>` : ''}
 
       <div class="row row--between row--wrap" style="gap:var(--sp-3);margin-bottom:var(--sp-5)">
-        <div class="segmented">
-          ${Object.keys(LABELS).map((k) => `<button data-tab="${k}" class="${k === tab ? 'is-active' : ''}">${LABELS[k]}</button>`).join('')}
+        <div class="segmented" role="tablist" aria-label="健康记录分类">
+          ${Object.keys(LABELS).map((k) => `<button id="tab-${k}" role="tab" aria-selected="${k === tab}" aria-controls="health-panel" tabindex="${k === tab ? 0 : -1}" data-tab="${k}" class="${k === tab ? 'is-active' : ''}">${LABELS[k]}</button>`).join('')}
         </div>
-        <button class="btn btn--primary" id="add-rec">＋ 添加${LABELS[tab]}记录</button>
+        <button class="btn btn--primary" id="add-rec" type="button">${addLabel}</button>
       </div>
 
-      ${body}
+      <div id="health-panel" role="tabpanel" aria-labelledby="tab-${tab}" tabindex="0">
+        ${body}
+      </div>
     `;
 
     el.querySelectorAll('[data-tab]').forEach((b) =>
       b.addEventListener('click', () => { tab = b.dataset.tab; render(); }));
+    el.querySelector('[role="tablist"]')?.addEventListener('keydown', (e) => {
+      const keys = Object.keys(LABELS);
+      const i = keys.indexOf(tab);
+      let next = null;
+      if (e.key === 'ArrowRight') next = (i + 1) % keys.length;
+      if (e.key === 'ArrowLeft') next = (i - 1 + keys.length) % keys.length;
+      if (e.key === 'Home') next = 0;
+      if (e.key === 'End') next = keys.length - 1;
+      if (next == null) return;
+      e.preventDefault();
+      tab = keys[next];
+      render();
+      el.querySelector(`#tab-${tab}`)?.focus();
+    });
     el.querySelectorAll('[data-pet]').forEach((b) =>
       b.addEventListener('click', () => { store.setActivePet(b.dataset.pet); health(el); }));
-    el.querySelector('#add-rec').addEventListener('click', () => FORMS[tab](pet, render));
+    el.querySelector('#add-rec').addEventListener('click', () => {
+      if (tab === 'cost') openExpenseForm(pet, render);
+      else if (tab === 'medication') openRecordForm(pet, 'medication', render);
+      else openRecordForm(pet, tab, render);
+    });
+
+    el.querySelector('#symptom-add')?.addEventListener('click', () => openRecordForm(pet, 'symptom', render));
+    el.querySelectorAll('[data-sy-menu]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const sy = store.get().symptoms.find((x) => x.id === b.dataset.syMenu);
+        if (sy) openSymptomActions(pet, sy, render);
+      }));
+    el.querySelectorAll('[data-med-toggle]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const action = store.toggleMedicationLog(b.dataset.medToggle, todayISO());
+        toast(action === 'added' ? '已记录今日服药' : '已取消今日打卡');
+        render();
+      }));
+    el.querySelectorAll('[data-med-menu]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const med = store.get().medications.find((x) => x.id === b.dataset.medMenu);
+        if (med) openMedicationActions(pet, med, render);
+      }));
+    el.querySelectorAll('[data-cost-menu]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const entry = store.costEntries(pet.id).find((x) => x.id === b.dataset.costMenu);
+        if (entry) openCostActions(pet, entry, render);
+      }));
+    el.querySelector('#claim-open')?.addEventListener('click', () => openClaimPack(pet));
+    el.querySelector('#cost-year')?.addEventListener('change', (e) => {
+      costYear = Number(e.target.value);
+      render();
+    });
+    el.querySelector('#policy-add')?.addEventListener('click', () => openPolicyForm(pet, render));
+    el.querySelectorAll('[data-policy-menu]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const policy = store.policiesOf(pet.id).find((x) => x.id === b.dataset.policyMenu);
+        if (policy) openPolicyActions(pet, policy, render);
+      }));
+
+    // 每条记录的「⋯」：编辑 / 删除
+    el.querySelectorAll('[data-menu]').forEach((b) =>
+      b.addEventListener('click', () => {
+        const rec = store.get().records.find((r) => r.id === b.dataset.menu);
+        if (rec) openRecordActions(pet, rec, render);
+      }));
 
     // 一键顺延：今天做了 → 直接生成新记录，下次日期按周期算好
     el.querySelectorAll('[data-done]').forEach((b) =>
       b.addEventListener('click', () => {
-        const type = b.dataset.type;
-        const kind = b.dataset.kind || undefined;
-        const today = todayISO();
-        const next = store.suggestNext(type, kind, today);
-        store.addRecord({
-          petId: pet.id,
-          type,
-          kind,
-          name: b.dataset.name || undefined,
-          product: b.dataset.product || undefined,
-          date: today,
-          nextDate: next,
-        });
-        toast(`已记录 · 下次 ${fmtDate(next, false)}`);
+        const rec = store.get().records.find((r) => r.id === b.dataset.done);
+        if (!rec) return;
+        const reminder = {
+          sourceId: rec.id,
+          sourceDate: rec.date,
+          type: rec.type,
+          kind: rec.kind,
+          title: rec.type === 'vaccine' ? (rec.name || '疫苗') : `${rec.kind}驱虫`,
+          sub: rec.type === 'vaccine' ? rec.hospital : rec.product,
+          hospital: rec.hospital || '',
+        };
+        const res = store.completeReminder(pet.id, reminder, todayISO());
+        if (res.duplicate) {
+          toast('本周期已打卡，无需重复记录', '⏳');
+          return;
+        }
+        toast(`已记录 · 下次 ${fmtDate(res.record?.nextDate, false)}`);
         render();
       }));
   };

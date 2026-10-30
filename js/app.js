@@ -3,14 +3,14 @@
    ============================================================ */
 import * as store from './store.js';
 import * as router from './router.js';
-import { esc, hydrateIcons, toast, openModal } from './ui.js';
+import { esc, hydrateIcons, toast, openModal, closeModal } from './ui.js';
 
 import dashboard from './views/dashboard.js';
 import health from './views/health.js';
 import timeline from './views/timeline.js';
 import nearby from './views/nearby.js';
 import community from './views/community.js';
-import petPage from './views/pet.js';
+import petPage, { openEmergencyMode, closeEmergencyMode } from './views/pet.js';
 import me from './views/me.js';
 
 const TITLES = {
@@ -60,23 +60,113 @@ function openAbout() {
         <div class="strong small" style="margin-bottom:8px">核心能力</div>
         <ul class="small" style="color:var(--c-ink-2);line-height:2;padding-left:2px">
           <li>🚨 &nbsp;<b>就医模式</b>：一屏给出医生需要的全部信息（含过敏史）</li>
-          <li>⚖️ &nbsp;体重曲线 + 品种标准区间对照，判断胖瘦</li>
-          <li>💉 &nbsp;疫苗 / 驱虫到期倒计时，一键顺延下次日期</li>
-          <li>📸 &nbsp;成长时间线自动汇入健康记录，里程碑生成分享卡片</li>
-          <li>📍 &nbsp;按城市 / 区域匹配附近宠友，约遛宠局</li>
-          <li>💬 &nbsp;社区动态、话题广场、点赞评论</li>
+          <li>✓ &nbsp;<b>3 秒打卡</b>：疫苗 / 驱虫到期，点一下顺延，连点只记一次</li>
+          <li>🧾 &nbsp;费用台账 + 理赔材料包；🧓 老年模式与生活质量趋势</li>
+          <li>🧳 &nbsp;出行证件包、寄养交接卡、走失海报</li>
+          <li>📴 &nbsp;可安装到桌面，离线也能看档案与就医卡</li>
+          <li>📅 &nbsp;提醒导出到系统日历，由日历负责通知</li>
         </ul>
       </div>
       <p class="xs muted">
-        当前为纯前端演示版本，数据保存在本机浏览器的 localStorage 中，不会上传到任何服务器。
-        因为纯静态站点无法做到系统级推送，「疫苗到期提醒」需要你打开本页面才能看到——
-        这一点在真实产品中会通过 App 推送解决。别忘了在「我的」里导出备份。
+        当前为纯前端演示版本，数据保存在本机浏览器，不会上传到任何服务器。
+        纯静态站点无法做到系统级推送，因此到期提醒需要打开页面，或导出到系统日历。
+        别忘了在「我的」里备份。
       </p>`,
   });
   panel.querySelector('#go-me')?.addEventListener('click', () => {
+    closeModal();
     location.hash = '#/me';
-    document.getElementById('modal-root').innerHTML = '';
   });
+}
+
+/* ---------- 标题待办数：任何写入后同步更新 ---------- */
+function updateDocumentTitle() {
+  const pet = store.activePet();
+  const due = pet ? store.reminders(pet.id).filter((r) => r.level === 'due').length : 0;
+  const base = router.baseOf(router.currentPath());
+  document.title = `${due ? `(${due}) ` : ''}${TITLES[base] || '首页'} · 爪迹 PawLog`;
+}
+
+/* ---------- 写入失败时置顶提示（不自动消失） ---------- */
+function initStorageUI() {
+  const banner = document.getElementById('storage-banner');
+  const text = document.getElementById('storage-banner-text');
+  const close = document.getElementById('storage-banner-close');
+  const action = document.getElementById('storage-banner-action');
+  if (!banner) return;
+
+  store.onStorageStatus((s) => {
+    if (!s || s.ok) {
+      banner.hidden = true;
+      return;
+    }
+    if (text) text.textContent = s.message || '本次修改未保存';
+    banner.hidden = false;
+  });
+
+  close?.addEventListener('click', () => { banner.hidden = true; });
+  action?.addEventListener('click', () => { location.hash = '#/me'; });
+
+  // 浏览器要求用户手势后才能申请持久化存储
+  document.addEventListener('click', () => { store.requestPersistence(); }, { once: true });
+}
+
+/* ---------- PWA：离线提示 / Service Worker / 更新提示 ---------- */
+function initPWA() {
+  const banner = document.getElementById('offline-banner');
+  const syncOffline = () => { if (banner) banner.hidden = navigator.onLine; };
+  syncOffline();
+  window.addEventListener('online', syncOffline);
+  window.addEventListener('offline', syncOffline);
+
+  if (!('serviceWorker' in navigator) || location.protocol === 'file:') return;
+
+  let refreshing = false;
+  let offered = false;
+  navigator.serviceWorker.addEventListener('controllerchange', () => {
+    if (refreshing) location.reload();
+  });
+
+  const offerUpdate = (worker) => {
+    if (offered || !worker) return;
+    offered = true;
+    toast('新版本已就绪', '✨', {
+      label: '刷新更新',
+      onClick: () => {
+        refreshing = true;
+        worker.postMessage({ type: 'SKIP_WAITING' });
+      },
+    });
+  };
+
+  navigator.serviceWorker.register('./sw.js', { scope: './' }).then((reg) => {
+    if (reg.waiting && navigator.serviceWorker.controller) offerUpdate(reg.waiting);
+    reg.addEventListener('updatefound', () => {
+      const worker = reg.installing;
+      worker?.addEventListener('statechange', () => {
+        // 第一次安装没有旧版本，不弹更新提示
+        if (worker.state === 'installed' && navigator.serviceWorker.controller) offerUpdate(worker);
+      });
+    });
+  }).catch(() => { /* 离线能力不可用不影响主流程 */ });
+}
+
+/* ---------- PWA：安装引导（浏览器支持时弹出安装） ---------- */
+function initInstallPrompt() {
+  window.__pawlogInstallPrompt = null;
+  window.addEventListener('beforeinstallprompt', (e) => {
+    e.preventDefault();
+    window.__pawlogInstallPrompt = e;
+  });
+  window.addEventListener('appinstalled', () => { window.__pawlogInstallPrompt = null; });
+  window.pawlogInstall = async () => {
+    const prompt = window.__pawlogInstallPrompt;
+    if (!prompt) return 'unavailable';
+    prompt.prompt();
+    const { outcome } = await prompt.userChoice;
+    window.__pawlogInstallPrompt = null;
+    return outcome;
+  };
 }
 
 /* ---------- 当天首次打开时，对待办做一次提示 ---------- */
@@ -86,7 +176,7 @@ function maybeNudge() {
   const due = store.reminders(pet.id).filter((r) => r.level === 'due');
   if (!due.length) return;
 
-  const today = new Date().toISOString().slice(0, 10);
+  const today = store.todayISO();
   const KEY = 'pawlog.nudged';
   try {
     if (localStorage.getItem(KEY) === today) return;
@@ -102,8 +192,22 @@ function maybeNudge() {
 function boot() {
   store.init();
   hydrateIcons();
+  initStorageUI();
+  initPWA();
+  initInstallPrompt();
   renderPetSwitchers();
   store.subscribe(renderPetSwitchers);
+  store.subscribe(updateDocumentTitle);
+  const applyLargeText = () => document.body.classList.toggle('large-text', !!store.get().settings?.largeText);
+  applyLargeText();
+  store.subscribe(applyLargeText);
+  let externalRefreshTimer = null;
+  store.onExternalUpdate(() => {
+    toast('另一标签页已更新，已同步最新数据', '🔄');
+    if (document.querySelector('#modal-root .modal')) closeModal();
+    clearTimeout(externalRefreshTimer);
+    externalRefreshTimer = setTimeout(() => router.rerender(), 120);
+  });
 
   router.define('dashboard', dashboard);
   router.define('health', health);
@@ -115,21 +219,62 @@ function boot() {
   router.fallback(dashboard);
 
   router.onRoute((path, base) => {
-    document.querySelectorAll('[data-nav]').forEach((a) =>
-      a.classList.toggle('is-active', a.dataset.nav === base));
+    closeModal();
+    closeEmergencyMode();
+    document.querySelectorAll('[data-nav]').forEach((a) => {
+      const active = a.dataset.nav === base;
+      a.classList.toggle('is-active', active);
+      if (active) a.setAttribute('aria-current', 'page');
+      else a.removeAttribute('aria-current');
+    });
 
     // 标题带待办数，切到别的标签页也能一眼看到
-    const pet = store.activePet();
-    const due = pet ? store.reminders(pet.id).filter((r) => r.level === 'due').length : 0;
-    document.title = `${due ? `(${due}) ` : ''}${TITLES[base] || '首页'} · 爪迹 PawLog`;
+    updateDocumentTitle();
 
     window.scrollTo({ top: 0 });
   });
 
   router.start();
   maybeNudge();
+  store.requestPersistence();
 
   document.getElementById('btn-about').addEventListener('click', openAbout);
+  document.getElementById('skip-link')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    const view = document.getElementById('view');
+    if (view) {
+      view.focus();
+      view.scrollIntoView({ block: 'start' });
+    }
+  });
+  const openErx = () => {
+    const path = router.currentPath();
+    let pet = store.activePet();
+    // 正在看某只宠物的档案时，急救必须打开这一只，而不是切换器里的激活宠物
+    if (path.startsWith('pet/')) {
+      const id = decodeURIComponent(path.slice(4));
+      pet = store.petById(id) || pet;
+    }
+    if (!pet) { toast('先添加一只宠物，再使用急救卡', '🐾'); return; }
+    if (pet.deceased) { toast(`${pet.name} 已进入纪念模式，不再显示就医卡`, '🕯️'); return; }
+    openEmergencyMode(pet);
+  };
+  document.getElementById('btn-erx')?.addEventListener('click', openErx);
+  document.getElementById('btn-erx-desktop')?.addEventListener('click', openErx);
+
+  // 桌面图标「急救」快捷方式：./?erx=1#/dashboard
+  if (new URLSearchParams(location.search).get('erx') === '1') {
+    history.replaceState(null, '', `${location.pathname}${location.hash}`);
+    setTimeout(openErx, 300);
+  }
+
+  // 写入失败时，离开页面前提醒一次
+  window.addEventListener('beforeunload', (e) => {
+    if (!store.getStorageStatus().ok) {
+      e.preventDefault();
+      e.returnValue = '';
+    }
+  });
 }
 
 if (document.readyState === 'loading') {

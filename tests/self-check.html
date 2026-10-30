@@ -3,6 +3,7 @@
 <head>
 <meta charset="utf-8">
 <title>t</title>
+<link rel="icon" href="../icons/icon-192.png">
 <link rel="stylesheet" href="../css/tokens.css">
 <link rel="stylesheet" href="../css/app.css">
 </head>
@@ -14,12 +15,28 @@
 <script type="module">
 import * as store from '../js/store.js';
 import { emergencyCard, emergencyText } from '../js/views/pet.js';
+import { redFlagGroups } from '../js/red-flags.js';
+import { travelItems } from '../js/views/travel.js';
+import { buildPosterCanvas } from '../js/views/lost.js';
+import { buildICS, icsEscape } from '../js/ics.js';
+import { copyText, allergyStatus, field } from '../js/ui.js';
+import community from '../js/views/community.js';
 
 const out = [];
 const ok  = (n, c, extra='') => out.push(`${c ? 'PASS' : 'FAIL'} | ${n}${extra ? ' | ' + extra : ''}`);
 
+/* ---------- 自检隔离：绝不碰生产 key ---------- */
+const TEST_KEY = 'pawlog.test.v1';
+const TEST_BACKUP_KEY = `${TEST_KEY}.backup.last`;
+let prodBefore = null;
+try { prodBefore = localStorage.getItem('pawlog.state.v2'); } catch { /* ignore */ }
+
+store.configure({ key: TEST_KEY, legacyKey: null, backupEnabled: false });
+try { localStorage.removeItem(TEST_KEY); localStorage.removeItem(TEST_BACKUP_KEY); } catch { /* ignore */ }
 store.init();
+
 const pet = store.activePet();
+ok('自检使用独立存储键', store.getStorageStatus().ok === true && !!pet, pet?.name || 'no pet');
 
 /* 1. 就医卡渲染 */
 const html = emergencyCard(pet);
@@ -28,6 +45,54 @@ ok('就医卡：含过敏史', html.includes('过敏史'));
 ok('就医卡：过敏内容红字', html.includes('erx__sec--alert') && html.includes('青霉素'));
 ok('就医卡：含芯片号', html.includes('156 0001 2345 6789'));
 ok('就医卡：含疫苗史', html.includes('猫三联'));
+ok('就医卡：含近期症状与问诊清单', html.includes('最近 24 小时') && html.includes('可以问医生'));
+ok('就医卡：含当前用药与症状摘要', html.includes('当前用药') && html.includes('肾脏支持片') && html.includes('呕吐'), JSON.stringify({ a: html.includes('当前用药'), b: html.includes('肾脏支持片'), c: html.includes('呕吐'), meds: store.medicationsOf(pet.id).length, symptoms: store.symptomsOf(pet.id).length }));
+const seedMeds = store.medicationsOf(pet.id);
+ok('seed 用药数据', seedMeds.length >= 1 && seedMeds[0].active, `${seedMeds.length} 条`);
+const seedSymptoms = store.symptomsOf(pet.id);
+ok('seed 症状数据', seedSymptoms.length >= 2, `${seedSymptoms.length} 条`);
+const seedPolicies = store.policiesOf(pet.id);
+ok('seed 保单数据', seedPolicies.length === 1, `${seedPolicies.length} 条`);
+const seedCosts = store.costEntries(pet.id);
+ok('费用台账汇总', seedCosts.length >= 4 && seedCosts.reduce((a, e) => a + e.amount, 0) === 880, `${seedCosts.length} 笔 / ¥${seedCosts.reduce((a, e) => a + e.amount, 0)}`);
+ok('老年判定', store.isSenior(pet) === true);
+const seedQol = store.qolOf(pet.id);
+ok('seed 生活质量评分', seedQol.length === 4 && seedQol[0].total === 58, `${seedQol.length} 条 / latest ${seedQol[0]?.total}`);
+const seedFollowUps = store.followUpsOf(pet.id);
+ok('seed 复诊提醒', seedFollowUps.length === 1 && seedFollowUps[0].date === store.addDays(store.todayISO(), 4), JSON.stringify(seedFollowUps[0] || null));
+ok('一起走过按接回日期', store.togetherDays(pet) === 890, String(store.togetherDays(pet)));
+ok('当前用药过滤已结束', store.currentMedicationsOf(pet.id).length === 1, String(store.currentMedicationsOf(pet.id).length));
+const travelRows = travelItems(pet);
+const rowOf = (k) => travelRows.find((x) => x.key === k);
+ok('出行：常规疫苗不混入狂犬', rowOf('vaccine').value.includes('猫三联') && !rowOf('vaccine').value.includes('狂犬'));
+ok('出行：狂犬单独列出', rowOf('rabies').value.includes('狂犬'));
+ok('出行：驱虫同时列体内外', rowOf('deworm').value.includes('体内') && rowOf('deworm').value.includes('体外'));
+ok('出行：驱虫按最早到期提示', rowOf('deworm').status.text.includes('3 天'), rowOf('deworm').status.text);
+
+/* 6g. ICS 日历导出 */
+const icsText = buildICS(pet, {
+  reminders: store.reminders(pet.id),
+  meds: store.currentMedicationsOf(pet.id),
+  now: new Date('2026-10-10T00:00:00Z'),
+});
+ok('ICS：VCALENDAR 结构', icsText.startsWith('BEGIN:VCALENDAR\r\n') && icsText.endsWith('END:VCALENDAR\r\n'));
+ok('ICS：仅用 CRLF 换行', !/(^|[^\r])\n/.test(icsText));
+ok('ICS：包含闹钟与循环', icsText.includes('BEGIN:VALARM') && icsText.includes('TRIGGER:-P3D')
+  && icsText.includes('RRULE:FREQ=YEARLY;COUNT=3') && icsText.includes('RRULE:FREQ=DAILY;INTERVAL=30;COUNT=12'));
+ok('ICS：用药每日提醒', /SUMMARY:.*服药/.test(icsText) && /RRULE:FREQ=DAILY;COUNT=/.test(icsText));
+ok('ICS：DTSTAMP 为 UTC', icsText.includes('DTSTAMP:20261010T000000Z'));
+ok('ICS：文本转义', icsEscape('a,b;c\nd') === 'a\\,b\\;c\\nd', icsEscape('a,b;c\nd'));
+ok('ICS：每行不超过 75 字节', icsText.split('\r\n').every((line) => new TextEncoder().encode(line).length <= 75));
+const blankAllergyHtml = emergencyCard({ ...pet, allergies: '' });
+ok('空过敏史不写成无过敏', blankAllergyHtml.includes('未填写') && !blankAllergyHtml.includes('无已知过敏'));
+ok('过敏史：长句不被误判为无', allergyStatus('没有做过过敏原检测').text === '没有做过过敏原检测');
+ok('过敏史：保留但书', allergyStatus('无过敏史，但对鸡肉过敏').has === true && allergyStatus('无过敏史，但对鸡肉过敏').text.includes('鸡肉'));
+ok('过敏史：空白提示未填写', allergyStatus('   ').unknown === true);
+ok('过敏史：简单否定归一化', allergyStatus('无过敏史。').text === '无已知过敏' && allergyStatus('无过敏史。').has === false);
+
+const catFlags = redFlagGroups('猫');
+ok('急诊红旗：猫有尿闭提示', catFlags.some((g) => g.items.some((x) => x.includes('排尿'))));
+ok('急诊红旗：通用误食提示', redFlagGroups('狗').some((g) => g.items.some((x) => x.includes('巧克力'))));
 
 /* 2. 就医文本导出 */
 const text = emergencyText(pet);
@@ -59,24 +124,206 @@ ok('周期推算：驱虫 +30 天', next === '2026-03-31', next);
 const nextV = store.suggestNext('vaccine', null, '2026-03-01');
 ok('周期推算：疫苗 +365 天', nextV === '2027-03-01', nextV);
 
-/* 5. 一键顺延：记录数 +1 且下次日期后移 */
+/* 5. 一键顺延：只记一次、继承产品信息 */
 const before = store.get().records.length;
 const rem = store.reminders(pet.id)[0];
-store.completeReminder(pet.id, rem, '2026-10-10');
+const r1 = store.completeReminder(pet.id, rem, '2026-10-10');
+const r2 = store.completeReminder(pet.id, rem, '2026-10-10');
 const after = store.get().records.length;
 ok('一键顺延：新增一条记录', after === before + 1, `${before} -> ${after}`);
-const newest = store.recordsOf(pet.id).find(r => r.date === '2026-10-10');
-ok('一键顺延：下次日期已按周期推算', newest && !!newest.nextDate, newest?.nextDate || 'none');
+ok('一键顺延：重复点击不重复记录', r2.duplicate === true && r1.duplicate === false, JSON.stringify({ r1: r1.duplicate, r2: r2.duplicate }));
+ok('一键顺延：继承上次药品/医院', !!r1.record && (!!r1.record.product || !!r1.record.hospital), r1.record?.product || r1.record?.hospital || 'none');
+ok('一键顺延：下次日期已按周期推算', !!r1.record?.nextDate, r1.record?.nextDate || 'none');
 
-/* 6. 导出 → 破坏 → 导入 往返一致 */
-store.init();
-const snapshot = store.exportJSON();
+/* 6. 记录 CRUD + 撤销 */
+const created = store.addRecord({ petId: pet.id, type: 'weight', date: '2026-09-01', value: 4.5 });
+ok('新增记录返回记录', !!created?.id, created?.id || 'none');
+store.updateRecord(created.id, { value: 4.6 });
+ok('编辑记录生效', store.get().records.find(x => x.id === created.id)?.value === 4.6);
+const deleted = store.deleteRecord(created.id);
+ok('删除记录生效', !store.get().records.some(x => x.id === created.id));
+store.restoreRecord(deleted);
+ok('撤销删除恢复记录', store.get().records.some(x => x.id === created.id));
+
+/* 6c. 症状 / 用药 / 费用 / 保单 CRUD */
+const sy = store.addSymptom({ petId: pet.id, at: '2026-10-10T08:00', vomiting: '1 次', diarrhea: '无', appetite: '减少', energy: '正常', water: '正常', urination: '正常', breathing: '正常', pain: 1, note: '测试' });
+ok('新增症状', !!sy?.id);
+store.updateSymptom(sy.id, { pain: 2 });
+ok('编辑症状', store.symptomsOf(pet.id).find(x => x.id === sy.id)?.pain === 2);
+const delSy = store.deleteSymptom(sy.id);
+ok('删除症状', !store.symptomsOf(pet.id).some(x => x.id === sy.id));
+store.restoreSymptom(delSy);
+ok('撤销删除症状', store.symptomsOf(pet.id).some(x => x.id === sy.id));
+
+const med = store.addMedication({ petId: pet.id, name: '测试药', dose: '1', unit: '片', frequency: '每日一次', times: ['08:00'], active: true });
+ok('新增用药', !!med?.id);
+const logsBefore = store.medicationLogsOf(pet.id, store.todayISO()).length;
+store.toggleMedicationLog(med.id, store.todayISO());
+ok('服药打卡', store.medicationLogsOf(pet.id, store.todayISO()).length === logsBefore + 1);
+store.toggleMedicationLog(med.id, store.todayISO());
+ok('取消服药打卡', store.medicationLogsOf(pet.id, store.todayISO()).length === logsBefore);
+const delMed = store.deleteMedication(med.id);
+ok('删除用药', !store.medicationsOf(pet.id).some(x => x.id === med.id));
+store.restoreMedication(delMed);
+ok('撤销删除用药', store.medicationsOf(pet.id).some(x => x.id === med.id));
+store.toggleMedicationLog(med.id, store.todayISO());
+const logsWithMed = store.medicationLogsOf(pet.id, store.todayISO()).length;
+const delMed2 = store.deleteMedication(med.id);
+store.restoreMedication(delMed2);
+ok('撤销删除用药保留打卡', store.medicationLogsOf(pet.id, store.todayISO()).length === logsWithMed, `${logsWithMed} -> ${store.medicationLogsOf(pet.id, store.todayISO()).length}`);
+
+const medFalse = store.addMedication({ petId: pet.id, name: '停用药', active: false });
+ok('active=false 保持停用', medFalse.active === false);
+const medStrFalse = store.addMedication({ petId: pet.id, name: '停用药2', active: 'false' });
+ok('active="false" 归一为停用', medStrFalse.active === false);
+const expiredMed = store.addMedication({ petId: pet.id, name: '过期药', active: true, endDate: store.addDays(store.todayISO(), -1) });
+ok('过期药不算当前用药', !store.currentMedicationsOf(pet.id).some(x => x.id === expiredMed.id) && store.medicationsOf(pet.id).some(x => x.id === expiredMed.id));
+
+const exp = store.addExpense({ petId: pet.id, date: '2026-10-10', category: '药品', amount: 50, note: '测试' });
+ok('新增费用', !!exp?.id);
+store.updateExpense(exp.id, { amount: 60 });
+ok('编辑费用', store.expensesOf(pet.id).find(x => x.id === exp.id)?.amount === 60);
+const delExp = store.deleteExpense(exp.id);
+ok('删除费用', !store.expensesOf(pet.id).some(x => x.id === exp.id));
+store.restoreExpense(delExp);
+ok('撤销删除费用', store.expensesOf(pet.id).some(x => x.id === exp.id));
+
+const pol = store.addPolicy({ petId: pet.id, company: '测试保险', policyNo: 'T-1', start: '2026-01-01', end: '2027-01-01' });
+ok('新增保单', !!pol?.id);
+
+const q = store.addQol({ petId: pet.id, date: '2026-10-10', scores: { hurt: 2, hunger: 8, hydration: 8, hygiene: 8, happiness: 8, mobility: 8, goodDays: 8 }, note: '测试' });
+ok('新增生活质量评分', !!q?.id && q.total === 56, `total ${q?.total}`);
+store.updateQol(q.id, { scores: { ...q.scores, hurt: 1 } });
+ok('编辑生活质量评分', store.qolOf(pet.id).find(x => x.id === q.id)?.total === 57);
+const delQ = store.deleteQol(q.id);
+ok('删除生活质量评分', !store.qolOf(pet.id).some(x => x.id === q.id));
+store.restoreQol(delQ);
+ok('撤销删除生活质量评分', store.qolOf(pet.id).some(x => x.id === q.id));
+
+store.updatePet(pet.id, { deceased: true });
+ok('纪念模式停止提醒', store.reminders(pet.id).length === 0);
+store.updatePet(pet.id, { deceased: true, passedDate: store.addDays(store.todayISO(), -3) });
+ok('纪念卡天数停在离开日', store.togetherDays(store.petById(pet.id)) === 887, String(store.togetherDays(store.petById(pet.id))));
+store.updatePet(pet.id, { deceased: false, passedDate: '' });
+ok('取消纪念模式恢复提醒', store.reminders(pet.id).length > 0);
+
+const seedPlaces = store.placesOf('重庆');
+ok('seed 宠物友好地点', seedPlaces.length === 5 && seedPlaces.every((p) => p.demo), `${seedPlaces.length} 个`);
+const healthBeforeClear = store.get().records.length;
+store.clearDemoContent();
+ok('清空演示内容不删健康数据', store.get().friends.length === 0 && store.get().posts.length === 0 && store.get().places.length === 0 && store.get().records.length === healthBeforeClear);
+
+/* 6d. 老版本没有 demo 标记的 seed 数据也能被清空 */
+const legacyDemo = {
+  pets: [{ id: 'p_demo', name: '演示', emoji: '🐱', species: '猫', breed: 'x' }],
+  friends: [{ id: 'f1', name: '阿茶' }],
+  posts: [{ id: 'po1', text: '旧动态' }],
+  activities: [{ id: 'a1', title: '旧活动' }],
+  places: [{ id: 'pl_1', name: '旧地点' }],
+};
+store.importJSON(JSON.stringify(legacyDemo), { mode: 'replace' });
+ok('旧演示数据自动标注', store.get().friends[0]?.demo === true && store.get().posts[0]?.demo === true && store.get().activities[0]?.demo === true && store.get().places[0]?.demo === true);
+store.clearDemoContent();
+ok('旧演示数据可清空', store.get().friends.length === 0 && store.get().posts.length === 0 && store.get().activities.length === 0 && store.get().places.length === 0);
+store.reset();
+
+/* 6e. 走失模式与海报 */
+store.setLostReport({ petId: pet.id, lastSeenAt: '2026-10-30T10:00', place: '测试地点', contact: '13800001111', note: '黑白猫，怕生' });
+ok('走失模式保存', store.lostOf()?.active === true && store.lostOf().place === '测试地点');
+const posterCanvas = buildPosterCanvas(store.petById(pet.id), store.lostOf());
+ok('走失海报尺寸', posterCanvas.width === 1080 && posterCanvas.height === 1500);
+ok('走失海报可导出', posterCanvas.toDataURL('image/png').startsWith('data:image/png'));
+store.clearLostReport();
+ok('走失模式可取消', !store.lostOf());
+
+/* 6f. 表单 label 与控件关联 */
+const fieldHtml = field('测试字段', '<input name="x">');
+ok('表单 label 关联控件', /for="field-\d+"/.test(fieldHtml) && /id="field-\d+"/.test(fieldHtml));
+
+/* 6b. 未来日期的来源记录也不能重复打卡 */
+const futureRec = store.addRecord({ petId: pet.id, type: 'vaccine', date: '2027-01-01', name: '测试疫苗', nextDate: '2028-01-01' });
+const futureRem = { sourceId: futureRec.id, sourceDate: futureRec.date, type: 'vaccine', title: '测试疫苗' };
+const f1 = store.completeReminder(pet.id, futureRem, '2026-10-10');
+const f2 = store.completeReminder(pet.id, futureRem, '2026-10-10');
+ok('未来日期提醒也只记一次', f1.duplicate === false && f2.duplicate === true, JSON.stringify({ f1: f1.duplicate, f2: f2.duplicate }));
+
+/* 7. 导入预检 / 合并导入 */
+const extra = {
+  pets: [{ id: 'p_new', name: '测试兔', emoji: '🐰', species: '其他', breed: '兔', gender: '公', neutered: false, birthday: '2024-01-01' }],
+  records: [{ id: 'r_new', petId: 'p_new', type: 'weight', date: '2026-10-01', value: 2 }],
+  posts: [{ id: 'po_new', author: 'me', name: '我', emoji: '🙂', city: '重庆', time: '2026-10-01', text: '合并测试', imgs: [], tags: [], likes: 0, liked: false, comments: [] }],
+  friends: [{ id: 'f_new', name: '测试宠友', emoji: '🐱', city: '重庆', district: '北碚区', distance: 1, pets: [], bio: '', tags: [], posts: 0 }],
+  activities: [{ id: 'a_new', title: '测试活动', host: '我', emoji: '🐾', city: '重庆', district: '北碚区', date: '2026-10-01', time: '10:00', joined: 1, cap: 10, tags: [] }],
+  joinedIds: ['a1'],
+};
+const preview = store.previewImport(JSON.stringify(extra));
+ok('导入预检返回数量', preview.pets === 1 && preview.records === 1, JSON.stringify(preview));
 const petsBefore = store.get().pets.length;
-store.update(s => { s.pets = []; s.records = []; });
-const r = store.importJSON(snapshot);
-ok('备份往返：宠物数恢复', store.get().pets.length === petsBefore, `${r.pets} 只 · ${r.records} 条记录`);
+const mergeRes = store.importJSON(JSON.stringify(extra), { mode: 'merge' });
+ok('合并导入不覆盖现有宠物', store.get().pets.length === petsBefore + 1 && mergeRes.mode === 'merge', `${petsBefore} -> ${store.get().pets.length}`);
+ok('合并导入保留动态', store.get().posts.some((p) => p.id === 'po_new'));
+ok('合并导入保留宠友', store.get().friends.some((f) => f.id === 'f_new'));
+ok('合并导入保留活动', store.get().activities.some((a) => a.id === 'a_new'));
+ok('合并导入合并报名', store.get().joinedIds.includes('a1'));
 
-/* 7. 旧版本数据兼容（缺新字段不应崩溃） */
+/* 7b. 重复 id / 非法日期必须被拒绝 */
+try {
+  store.importJSON(JSON.stringify({
+    pets: [{ id: 'p_dup', name: '重复', emoji: '🐱', species: '猫', breed: 'x' }],
+    records: [
+      { id: 'r_dup', petId: 'p_dup', type: 'weight', date: '2026-01-01', value: 4 },
+      { id: 'r_dup', petId: 'p_dup', type: 'weight', date: '2026-02-01', value: 4.1 },
+    ],
+  }), { mode: 'merge' });
+  ok('重复记录 id 被拒绝', false, '竟然接受了');
+} catch (e) {
+  ok('重复记录 id 被拒绝', true, e.message);
+}
+
+try {
+  store.importJSON(JSON.stringify({
+    pets: [{ id: 'p_date', name: '日期', emoji: '🐱', species: '猫', breed: 'x' }],
+    records: [{ id: 'r_date', petId: 'p_date', type: 'weight', date: '2020-13-40', value: 4 }],
+  }), { mode: 'merge' });
+  ok('非法日期被拒绝', false, '竟然接受了');
+} catch (e) {
+  ok('非法日期被拒绝', true, e.message);
+}
+
+const badBase = { pets: [{ id: 'p_bad', name: '校验', emoji: '🐱', species: '猫', breed: 'x' }] };
+try {
+  store.importJSON(JSON.stringify({ ...badBase, medications: [{ id: 'm_bad', petId: 'p_missing', name: '药' }] }), { mode: 'merge' });
+  ok('孤儿用药被拒绝', false, '竟然接受了');
+} catch (e) { ok('孤儿用药被拒绝', true, e.message); }
+
+try {
+  store.importJSON(JSON.stringify({ ...badBase, symptoms: [{ id: 'sy_bad', petId: 'p_bad', at: 'not-a-date' }] }), { mode: 'merge' });
+  ok('非法症状时间被拒绝', false, '竟然接受了');
+} catch (e) { ok('非法症状时间被拒绝', true, e.message); }
+
+try {
+  store.importJSON(JSON.stringify({ ...badBase, expenses: [{ id: 'e_bad', petId: 'p_bad', date: '2026-01-01', amount: 'abc' }] }), { mode: 'merge' });
+  ok('非法费用金额被拒绝', false, '竟然接受了');
+} catch (e) { ok('非法费用金额被拒绝', true, e.message); }
+
+try {
+  store.importJSON(JSON.stringify({
+    ...badBase,
+    medications: [{ id: 'm_ok', petId: 'p_bad', name: '药' }],
+    medicationLogs: [{ id: 'ml_bad', petId: 'p_bad', medId: 'm_missing', date: '2026-01-01' }],
+  }), { mode: 'merge' });
+  ok('孤儿用药记录被拒绝', false, '竟然接受了');
+} catch (e) { ok('孤儿用药记录被拒绝', true, e.message); }
+
+try {
+  store.importJSON(JSON.stringify({
+    ...badBase,
+    qol: [{ id: 'q_bad', petId: 'p_bad', date: '2026-01-01', scores: 'oops' }],
+  }), { mode: 'merge' });
+  ok('非法生活质量分数被拒绝', false, '竟然接受了');
+} catch (e) { ok('非法生活质量分数被拒绝', true, e.message); }
+
+/* 8. 旧版本数据兼容（缺新字段不崩溃） */
 const legacy = {
   activePetId: 'old1',
   pets: [{ id: 'old1', name: '老数据', emoji: '🐱', species: '猫', breed: '中华田园猫',
@@ -94,13 +341,99 @@ try {
   ok('旧数据兼容：不崩溃', false, e.message);
 }
 
-/* 8. 导入坏文件应报错而非静默 */
+/* 9. 导入坏文件应报错而非静默 */
 try {
   store.importJSON('{"not":"pawlog"}');
   ok('坏文件被拒绝', false, '竟然接受了');
 } catch (e) {
   ok('坏文件被拒绝', true, e.message);
 }
+
+/* 10. 导入的文本会被转义（存储型 XSS 不生效） */
+try {
+  store.importJSON(JSON.stringify({
+    pets: [{ id: 'p_x', name: '<img src=x onerror=alert(1)>', emoji: '🐱', species: '猫', breed: 'x', birthday: '2020-01-01' }],
+    records: [{ id: 'r_x', petId: 'p_x', type: 'weight', date: '2026-01-01', value: 4.8 }],
+  }), { mode: 'replace' });
+  const p = store.activePet();
+  ok('恶意名字不会注入渲染', !emergencyCard(p).includes('<img'), 'escaped');
+} catch (e) {
+  ok('恶意名字不会注入渲染', false, e.message);
+}
+
+/* 10b. 社区话题标签不能注入 HTML */
+try {
+  store.addPost({
+    author: 'me', name: '我', emoji: '🙂', city: '重庆', time: store.todayISO(),
+    text: '话题测试', tags: ['<img src=x onerror=alert(1)>'], imgs: [], likes: 0, liked: false, comments: [],
+  });
+  const box = document.createElement('div');
+  document.body.appendChild(box);
+  community(box);
+  const tagBtn = [...box.querySelectorAll('[data-topic]')].find((b) => b.dataset.topic.includes('<img'));
+  tagBtn?.click();
+  const heading = box.querySelector('.section h2');
+  ok('社区话题标题不注入 HTML', !!tagBtn && !!heading && !heading.innerHTML.includes('<img'), heading?.innerHTML || 'no heading');
+  box.remove();
+} catch (e) {
+  ok('社区话题标题不注入 HTML', false, e.message);
+}
+
+/* 10c. 复制失败不能谎报成功 */
+try {
+  const origClip = navigator.clipboard;
+  const origExec = document.execCommand;
+  try { Object.defineProperty(navigator, 'clipboard', { value: undefined, configurable: true }); } catch { /* ignore */ }
+  document.execCommand = () => false;
+  const copyOk = await copyText('测试', '已复制');
+  ok('复制失败不谎报成功', copyOk === false, String(copyOk));
+  document.execCommand = origExec;
+  if (origClip) Object.defineProperty(navigator, 'clipboard', { value: origClip, configurable: true });
+} catch (e) {
+  ok('复制失败不谎报成功', false, e.message);
+}
+
+/* 10d. v2 损坏时应回退到仍然可用的 v1 */
+const CORRUPT_V2 = 'pawlog.test.corrupt.v2';
+const LEGACY_V1 = 'pawlog.test.corrupt.v1';
+try {
+  localStorage.setItem(LEGACY_V1, JSON.stringify(legacy));
+  localStorage.setItem(CORRUPT_V2, '{broken');
+  store.configure({ key: CORRUPT_V2, legacyKey: LEGACY_V1, backupEnabled: false });
+  store.init();
+  ok('v2 损坏时回退 v1', store.activePet()?.id === 'old1', store.activePet()?.id || 'none');
+  localStorage.removeItem(CORRUPT_V2);
+  localStorage.removeItem(LEGACY_V1);
+  localStorage.removeItem(`${CORRUPT_V2}.corrupt`);
+} catch (e) {
+  ok('v2 损坏时回退 v1', false, e.message);
+}
+
+/* 10e. PWA 资源可访问 */
+try {
+  const mf = await fetch('../manifest.webmanifest').then((r) => r.json());
+  ok('PWA manifest 可解析', mf.display === 'standalone' && mf.scope === './'
+    && mf.theme_color === '#C24A2B' && (mf.icons || []).length >= 2, JSON.stringify({ display: mf.display, icons: (mf.icons || []).length }));
+} catch (e) {
+  ok('PWA manifest 可解析', false, e.message);
+}
+try {
+  const swRes = await fetch('../sw.js');
+  const swText = await swRes.text();
+  ok('Service Worker 预缓存 app shell', swRes.ok && swText.includes('pawlog-m3')
+    && swText.includes('./js/app.js') && swText.includes('./js/ics.js'));
+} catch (e) {
+  ok('Service Worker 预缓存 app shell', false, e.message);
+}
+
+/* 11. 自检不污染生产数据 */
+let prodAfter = null;
+try { prodAfter = localStorage.getItem('pawlog.state.v2'); } catch { /* ignore */ }
+ok('自检不污染生产数据', prodBefore === prodAfter);
+ok('测试数据写入独立 key', (() => { try { return !!localStorage.getItem(TEST_KEY); } catch { return false; } })());
+
+/* 清理测试数据 */
+try { localStorage.removeItem(TEST_KEY); localStorage.removeItem(TEST_BACKUP_KEY); } catch { /* ignore */ }
 
 document.getElementById('report').textContent =
   out.join('\n') + `\n\n===== ${out.filter(l => l.startsWith('PASS')).length}/${out.length} PASS =====`;
