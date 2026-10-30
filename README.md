@@ -4,6 +4,8 @@
 
 🔗 **在线访问**：https://yanglqangela.github.io/pawlog/
 
+📊 **项目状态**：[STATUS.md](STATUS.md) —— 进度、验收结果、已知限制与下一步。
+
 ---
 
 ## 它解决什么问题
